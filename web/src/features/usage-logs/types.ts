@@ -161,6 +161,8 @@ export interface LogOtherData {
   login_method?: string
   user_agent?: string
   request_path?: string
+  billing_unit?: 'characters' | string
+  billing_characters?: number
   request_conversion?: string[]
   ws?: boolean
   audio?: boolean

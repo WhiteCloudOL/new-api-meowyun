@@ -195,6 +195,20 @@ function MobileTokensField({ log }: { log: UsageLog }) {
 
   const promptTokens = log.prompt_tokens || 0
   const completionTokens = log.completion_tokens || 0
+  const other = parseLogOther(log.other)
+  if (other?.billing_unit === 'characters') {
+    const characters = other.billing_characters ?? promptTokens
+    return (
+      <div className='bg-muted/20 min-w-0 rounded-md px-2 py-1.5'>
+        <span className='font-mono text-xs font-medium tabular-nums'>
+          {characters.toLocaleString()}
+        </span>
+        <span className='text-muted-foreground ml-1 text-[11px]'>
+          {t('Characters')}
+        </span>
+      </div>
+    )
+  }
   if (promptTokens === 0 && completionTokens === 0) {
     return (
       <div className='bg-muted/20 min-w-0 rounded-md px-2 py-1.5'>
@@ -203,7 +217,6 @@ function MobileTokensField({ log }: { log: UsageLog }) {
     )
   }
 
-  const other = parseLogOther(log.other)
   const cacheReadTokens = other?.cache_tokens || 0
   const cacheWrite5m = other?.cache_creation_tokens_5m || 0
   const cacheWrite1h = other?.cache_creation_tokens_1h || 0

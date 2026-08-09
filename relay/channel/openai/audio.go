@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -18,6 +19,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const newAPIUsageCharactersHeader = "X-NewAPI-Usage-Characters"
+
+func upstreamCharacterCount(resp *http.Response) (int, bool, error) {
+	rawCount := resp.Header.Get(newAPIUsageCharactersHeader)
+	if rawCount == "" {
+		return 0, false, nil
+	}
+	resp.Header.Del(newAPIUsageCharactersHeader)
+
+	count, err := strconv.Atoi(rawCount)
+	if err != nil || count < 0 {
+		return 0, false, fmt.Errorf("invalid upstream character usage %q", rawCount)
+	}
+	return count, true, nil
+}
+
 func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) *dto.Usage {
 	// the status code has been judged before, if there is a body reading failure,
 	// it should be regarded as a non-recoverable error, so it should not return err for external retry.
@@ -29,6 +46,14 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 	usage := &dto.Usage{}
 	usage.PromptTokens = info.GetEstimatePromptTokens()
 	usage.TotalTokens = info.GetEstimatePromptTokens()
+	characterCount, useCharacterBilling, characterCountErr := upstreamCharacterCount(resp)
+	if characterCountErr != nil {
+		logger.LogWarn(c, characterCountErr.Error())
+	}
+	if useCharacterBilling {
+		c.Set("billing_unit", "characters")
+		c.Set("billing_characters", characterCount)
+	}
 	for k, v := range resp.Header {
 		if !service.ShouldCopyUpstreamHeader(c, k, v) {
 			continue
@@ -69,6 +94,15 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 		_, err = c.Writer.Write(bodyBytes)
 		if err != nil {
 			logger.LogError(c, fmt.Sprintf("failed to write TTS response: %v", err))
+		}
+
+		if useCharacterBilling {
+			usage.PromptTokens = characterCount
+			usage.PromptTokensDetails.TextTokens = characterCount
+			usage.CompletionTokens = 0
+			usage.CompletionTokenDetails.AudioTokens = 0
+			usage.TotalTokens = characterCount
+			return usage
 		}
 
 		// 计算音频时长并更新 usage

@@ -419,6 +419,21 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
 
   const rows: Array<{ label: string; value: string }> = []
 
+  if (other.billing_unit === 'characters') {
+    const characters = other.billing_characters ?? promptTokens
+    rows.push({
+      label: t('Characters'),
+      value: characters.toLocaleString(),
+    })
+    return (
+      <DetailSection label={t('Billing Details')}>
+        {rows.map((row) => (
+          <DetailRow key={row.label} label={row.label} value={row.value} mono />
+        ))}
+      </DetailSection>
+    )
+  }
+
   rows.push({ label: t('Input Tokens'), value: promptTokens.toLocaleString() })
   rows.push({
     label: t('Output Tokens'),

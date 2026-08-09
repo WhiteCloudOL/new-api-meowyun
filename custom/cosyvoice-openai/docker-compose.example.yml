@@ -1,0 +1,20 @@
+services:
+  cosyvoice-openai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com}
+      NEW_API_BILLING_MODE: ${NEW_API_BILLING_MODE:-characters}
+      COSYVOICE_SAMPLE_RATE: ${COSYVOICE_SAMPLE_RATE:-24000}
+      UPSTREAM_TIMEOUT_SECONDS: ${UPSTREAM_TIMEOUT_SECONDS:-120}
+    expose:
+      - "8080"
+    networks:
+      - new-api
+
+networks:
+  new-api:
+    external: true
+    name: ${NEW_API_NETWORK:-new-api_default}

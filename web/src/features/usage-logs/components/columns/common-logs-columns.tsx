@@ -653,6 +653,19 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         const promptTokens = log.prompt_tokens || 0
         const completionTokens = log.completion_tokens || 0
+        if (other?.billing_unit === 'characters') {
+          const characters = other.billing_characters ?? promptTokens
+          return (
+            <div className='flex flex-col gap-0.5'>
+              <span className='font-mono text-xs font-medium tabular-nums'>
+                {characters.toLocaleString()}
+              </span>
+              <span className='text-muted-foreground text-[11px]'>
+                {t('Characters')}
+              </span>
+            </div>
+          )
+        }
         if (promptTokens === 0 && completionTokens === 0) {
           return <span className='text-muted-foreground text-xs'>-</span>
         }
