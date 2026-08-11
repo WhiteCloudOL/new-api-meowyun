@@ -1,8 +1,8 @@
 # Meowyun custom changes
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
-This fork keeps the custom Alibaba Cloud Model Studio CosyVoice integration used by the Meowyun deployment. The production server is intentionally not updated by this commit.
+This fork keeps the custom Alibaba Cloud Model Studio CosyVoice integration used by the Meowyun deployment. Production currently runs the fork build described below.
 
 ## Goal
 
@@ -81,3 +81,24 @@ bun run build
 ```
 
 Before committing, also run `git diff --check` and scan the added files for credentials.
+
+## Production deployment
+
+- Deployed on 2026-08-11 from code commit `eb56228a4351a9ae7cc3d321d2b13d7e072095f7`.
+- NewAPI image: `meowyun/new-api:fork-eb56228a`.
+- Previous rollback image: `meowyun/new-api:v1.0.0-rc.23-openai-tts.1`.
+- CosyVoice image remains `meowyun/cosyvoice-openai:1.1`; its container was not recreated during the NewAPI update.
+- Server source checkout: `/root/new-api/.fork-src`.
+- Pre-deployment backup: `/root/new-api/.backups/20260811-173036-pre-fork-eb56228a` and the matching local `.server-backups/` directory.
+
+Production verification used a seven-character request through NewAPI. The response was `audio/mpeg`, the usage log recorded seven input characters and zero completion tokens, and `billing_unit` was `characters`. The preserved database price is `ModelRatio=80` with group ratio `1`, so the expected charge is `ceil(7 * 80) = 560` quota units. With NewAPI's `$2/1M` baseline per ratio unit, this is a configured price of `$160/1M` characters. That numerical price is intentionally above Alibaba Cloud Model Studio's Beijing list price of RMB 100 per million characters when the display number is treated as RMB.
+
+The following checks passed for this deployment:
+
+```bash
+go test ./relay/channel/openai
+go test ./service -run 'Test(GenerateTextOtherInfoIncludesCharacterBilling|GenerateTextOtherInfoOmitsCharacterBillingForNormalRequests|CharacterBilledTTSUsesTextInputRatio)$' -count=1
+python -B -m unittest -v custom/cosyvoice-openai/test_app.py
+```
+
+The full `go test ./service` run had one shared-state failure in `TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode`; that unrelated test passed when rerun alone.
