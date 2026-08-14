@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,6 +114,17 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			baseUrl = "ws://" + baseUrl
 			info.ChannelBaseUrl = baseUrl
 		}
+	}
+	if info.ChannelType == constant.ChannelTypeOpenRouter &&
+		(info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits) {
+		baseURL := strings.TrimRight(info.ChannelBaseUrl, "/")
+		if baseURL == "" {
+			baseURL = "https://openrouter.ai/api"
+		}
+		if strings.HasSuffix(baseURL, "/v1") {
+			return baseURL + "/images", nil
+		}
+		return baseURL + "/v1/images", nil
 	}
 	switch info.ChannelType {
 	case constant.ChannelTypeAzure:
@@ -441,6 +453,10 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	if isOpenRouterImageRequest(info) {
+		return convertOpenRouterImageRequest(c, info, request)
+	}
+
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {
@@ -574,6 +590,201 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
+func isOpenRouterImageRequest(info *relaycommon.RelayInfo) bool {
+	return info != nil && info.ChannelMeta != nil && info.ChannelType == constant.ChannelTypeOpenRouter &&
+		(info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits)
+}
+
+type openRouterImageReference struct {
+	Type     string `json:"type"`
+	ImageURL struct {
+		URL string `json:"url"`
+	} `json:"image_url"`
+}
+
+func newOpenRouterImageReference(imageURL string) json.RawMessage {
+	reference := openRouterImageReference{Type: "image_url"}
+	reference.ImageURL.URL = imageURL
+	data, _ := json.Marshal(reference)
+	return data
+}
+
+func addOpenRouterImageReference(refs *[]json.RawMessage, raw json.RawMessage) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	if raw[0] == '[' {
+		var values []json.RawMessage
+		if err := json.Unmarshal(raw, &values); err != nil {
+			return fmt.Errorf("invalid input_references: %w", err)
+		}
+		for _, value := range values {
+			if err := addOpenRouterImageReference(refs, value); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	var imageURL string
+	if err := json.Unmarshal(raw, &imageURL); err == nil && imageURL != "" {
+		*refs = append(*refs, newOpenRouterImageReference(imageURL))
+		return nil
+	}
+
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return fmt.Errorf("invalid image reference: %w", err)
+	}
+	if _, ok := object["image_url"]; ok {
+		*refs = append(*refs, raw)
+		return nil
+	}
+	if urlValue, ok := object["url"]; ok {
+		if err := json.Unmarshal(urlValue, &imageURL); err != nil || imageURL == "" {
+			return fmt.Errorf("invalid image reference url")
+		}
+		*refs = append(*refs, newOpenRouterImageReference(imageURL))
+		return nil
+	}
+	return fmt.Errorf("image reference must contain image_url or url")
+}
+
+func addOpenRouterMultipartReferences(refs *[]json.RawMessage, fileHeaders []*multipart.FileHeader) error {
+	for _, fileHeader := range fileHeaders {
+		file, err := fileHeader.Open()
+		if err != nil {
+			return fmt.Errorf("failed to open image file %q: %w", fileHeader.Filename, err)
+		}
+		data, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return fmt.Errorf("failed to read image file %q: %w", fileHeader.Filename, readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("failed to close image file %q: %w", fileHeader.Filename, closeErr)
+		}
+		dataURL := "data:" + detectImageMimeType(fileHeader.Filename) + ";base64," + base64.StdEncoding.EncodeToString(data)
+		*refs = append(*refs, newOpenRouterImageReference(dataURL))
+	}
+	return nil
+}
+
+func openRouterImageFiles(mf *multipart.Form) []*multipart.FileHeader {
+	if mf == nil || mf.File == nil {
+		return nil
+	}
+	for _, fieldName := range []string{"image", "image[]"} {
+		if files := mf.File[fieldName]; len(files) > 0 {
+			return files
+		}
+	}
+	var files []*multipart.FileHeader
+	for fieldName, fieldFiles := range mf.File {
+		if strings.HasPrefix(fieldName, "image[") {
+			files = append(files, fieldFiles...)
+		}
+	}
+	return files
+}
+
+func putOpenRouterRaw(payload map[string]json.RawMessage, name string, value json.RawMessage) {
+	value = bytes.TrimSpace(value)
+	if len(value) > 0 && !bytes.Equal(value, []byte("null")) {
+		payload[name] = value
+	}
+}
+
+func convertOpenRouterImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	payload := make(map[string]json.RawMessage)
+	model, err := json.Marshal(request.Model)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode image model: %w", err)
+	}
+	prompt, err := json.Marshal(request.Prompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode image prompt: %w", err)
+	}
+	payload["model"] = model
+	payload["prompt"] = prompt
+
+	if request.N != nil {
+		value, marshalErr := json.Marshal(request.N)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("failed to encode image count: %w", marshalErr)
+		}
+		payload["n"] = value
+	}
+	if request.Size != "" {
+		payload["size"], _ = json.Marshal(request.Size)
+	}
+	if request.Quality != "" {
+		payload["quality"], _ = json.Marshal(request.Quality)
+	}
+	putOpenRouterRaw(payload, "background", request.Background)
+	putOpenRouterRaw(payload, "output_format", request.OutputFormat)
+	putOpenRouterRaw(payload, "output_compression", request.OutputCompression)
+	if request.Stream != nil {
+		value, marshalErr := json.Marshal(request.Stream)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("failed to encode image stream flag: %w", marshalErr)
+		}
+		payload["stream"] = value
+	}
+	for name, value := range request.Extra {
+		if name != "model" && name != "prompt" {
+			putOpenRouterRaw(payload, name, value)
+		}
+	}
+	if request.ResponseFormat != "" {
+		if _, exists := payload["output_format"]; !exists {
+			payload["output_format"], _ = json.Marshal(request.ResponseFormat)
+		}
+	}
+
+	var references []json.RawMessage
+	if raw, ok := payload["input_references"]; ok {
+		if err := addOpenRouterImageReference(&references, raw); err != nil {
+			return nil, err
+		}
+	}
+	if len(references) == 0 {
+		if err := addOpenRouterImageReference(&references, request.Images); err != nil {
+			return nil, err
+		}
+		if err := addOpenRouterImageReference(&references, request.Image); err != nil {
+			return nil, err
+		}
+	}
+	if info.RelayMode == relayconstant.RelayModeImagesEdits && !isJSONRequest(c) {
+		mf := c.Request.MultipartForm
+		if mf == nil {
+			form, parseErr := common.ParseMultipartFormReusable(c)
+			if parseErr != nil {
+				return nil, fmt.Errorf("failed to parse multipart form: %w", parseErr)
+			}
+			c.Request.MultipartForm = form
+			c.Request.PostForm = url.Values(form.Value)
+			mf = form
+		}
+		if err := addOpenRouterMultipartReferences(&references, openRouterImageFiles(mf)); err != nil {
+			return nil, err
+		}
+	}
+	if len(references) > 0 {
+		payload["input_references"], err = json.Marshal(references)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode input_references: %w", err)
+		}
+	} else {
+		delete(payload, "input_references")
+	}
+
+	c.Request.Header.Set("Content-Type", "application/json")
+	return payload, nil
+}
+
 func isJSONRequest(c *gin.Context) bool {
 	if c == nil || c.Request == nil {
 		return false
@@ -621,6 +832,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	if isOpenRouterImageRequest(info) {
+		return channel.DoApiRequest(a, c, info, requestBody)
+	}
 	if info.RelayMode == relayconstant.RelayModeAudioTranscription ||
 		info.RelayMode == relayconstant.RelayModeAudioTranslation ||
 		(info.RelayMode == relayconstant.RelayModeImagesEdits && !isJSONRequest(c)) {
