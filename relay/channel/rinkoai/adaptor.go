@@ -8,12 +8,14 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/newapi"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -51,20 +53,33 @@ func IsNAIModel(model string) bool {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	if isNAIImage(info) {
+	if isNAIImage(info) || isRinkoImageWithUnknownModel(info) {
 		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/chat/completions", info.ChannelType), nil
 	}
 	return a.Adaptor.GetRequestURL(info)
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
-	if !IsNAIModel(request.Model) && !isNAIModelFromInfo(info) {
+	model := resolveImageModel(c, info, request)
+	if !IsNAIModel(model) && !isNAIModelFromInfo(info) {
 		return a.Adaptor.ConvertImageRequest(c, info, request)
+	}
+	request.Model = model
+	if info != nil {
+		if info.OriginModelName == "" {
+			info.OriginModelName = model
+		}
+		if info.ChannelMeta != nil && info.UpstreamModelName == "" {
+			info.UpstreamModelName = model
+		}
 	}
 	return convertNAIImageRequest(c, info, request)
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	if !isNAIImage(info) {
+		return a.Adaptor.DoRequest(c, info, requestBody)
+	}
 	// Use the outer adaptor so GetRequestURL above is used by DoApiRequest.
 	return channel.DoApiRequest(a, c, info, requestBody)
 }
@@ -90,12 +105,42 @@ func isNAIImage(info *relaycommon.RelayInfo) bool {
 		(isNAIModelFromInfo(info) || isNAIModelFromRequest(info))
 }
 
+func isRinkoImageWithUnknownModel(info *relaycommon.RelayInfo) bool {
+	return info != nil && info.ChannelType == constant.ChannelTypeRinkoAI &&
+		(info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits) &&
+		!isNAIModelFromInfo(info) && !isNAIModelFromRequest(info)
+}
+
 func isNAIModelFromRequest(info *relaycommon.RelayInfo) bool {
 	if info == nil || info.Request == nil {
 		return false
 	}
 	request, ok := info.Request.(*dto.ImageRequest)
 	return ok && IsNAIModel(request.Model)
+}
+
+func resolveImageModel(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) string {
+	model := strings.TrimSpace(request.Model)
+	if model == "" && c != nil && c.Request != nil {
+		form := c.Request.MultipartForm
+		if form == nil && strings.HasPrefix(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
+			if parsed, err := common.ParseMultipartFormReusable(c); err == nil {
+				form = parsed
+				c.Request.MultipartForm = parsed
+				c.Request.PostForm = url.Values(parsed.Value)
+			}
+		}
+		if form != nil && len(form.Value["model"]) > 0 {
+			model = strings.TrimSpace(form.Value["model"][0])
+		}
+	}
+	if model == "" && info != nil {
+		model = strings.TrimSpace(info.UpstreamModelName)
+	}
+	if model == "" && info != nil {
+		model = strings.TrimSpace(info.OriginModelName)
+	}
+	return model
 }
 
 func isNAIModelFromInfo(info *relaycommon.RelayInfo) bool {
