@@ -14,6 +14,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -109,6 +110,26 @@ func TestConvertNAIImageEditAcceptsBase64JSONInput(t *testing.T) {
 	encoded, err := common.Marshal(chatRequest)
 	require.NoError(t, err)
 	assert.Contains(t, string(encoded), `data:image/png;base64,ZmFrZSBpbWFnZQ==`)
+}
+
+func TestConvertNAIImageEditRejectsMissingOrInvalidImage(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		OriginModelName: "nai-diffusion-5-full",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "nai-diffusion-5-full",
+		},
+	}
+
+	for _, request := range []dto.ImageRequest{
+		{Prompt: "missing image"},
+		{Prompt: "invalid image", Image: json.RawMessage(`"!!!not-base64!!!"`)},
+	} {
+		_, err := convertNAIImageRequest(nil, info, request)
+		var apiErr *types.NewAPIError
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	}
 }
 
 func TestDoRequestRebuildsNAIImageBodyFromOriginalRequest(t *testing.T) {

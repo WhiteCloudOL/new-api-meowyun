@@ -229,13 +229,14 @@ func convertNAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 	if info != nil && info.RelayMode == relayconstant.RelayModeImagesEdits {
 		imageData, err := getInputImageDataURI(c, request)
 		if err != nil {
-			return nil, err
+			return nil, newNAIImageInputError(err)
 		}
-		if imageData != "" {
-			content = []dto.MediaContent{
-				{Type: "text", Text: request.Prompt},
-				{Type: "image_url", ImageUrl: map[string]string{"url": imageData}},
-			}
+		if imageData == "" {
+			return nil, newNAIImageInputError(fmt.Errorf("image is required for RinkoAI image edits"))
+		}
+		content = []dto.MediaContent{
+			{Type: "text", Text: request.Prompt},
+			{Type: "image_url", ImageUrl: map[string]string{"url": imageData}},
 		}
 	}
 
@@ -250,6 +251,10 @@ func convertNAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 		// image stream is generated from this complete response when requested.
 		Stream: &stream,
 	}, nil
+}
+
+func newNAIImageInputError(err error) error {
+	return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 }
 
 func getInputImageDataURI(c *gin.Context, request dto.ImageRequest) (string, error) {
