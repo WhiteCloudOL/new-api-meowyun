@@ -133,6 +133,9 @@ func resolveImageModel(c *gin.Context, info *relaycommon.RelayInfo, request dto.
 		if form != nil && len(form.Value["model"]) > 0 {
 			model = strings.TrimSpace(form.Value["model"][0])
 		}
+		if model == "" {
+			model = strings.TrimSpace(c.Request.FormValue("model"))
+		}
 	}
 	if model == "" && info != nil {
 		model = strings.TrimSpace(info.UpstreamModelName)
