@@ -80,6 +80,28 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 	if !isNAIImage(info) {
 		return a.Adaptor.DoRequest(c, info, requestBody)
 	}
+
+	// ImageHelper may intentionally preserve the original request body when
+	// pass-through is enabled. NAI image requests must always reach Rinko as a
+	// JSON chat-completion request, so rebuild the body at the final send point
+	// instead of allowing an original multipart body to leak upstream.
+	if imageRequest, ok := info.Request.(*dto.ImageRequest); ok {
+		converted, err := convertNAIImageRequest(c, info, *imageRequest)
+		if err != nil {
+			return nil, err
+		}
+		jsonData, err := common.Marshal(converted)
+		if err != nil {
+			return nil, fmt.Errorf("marshal RinkoAI image request: %w", err)
+		}
+		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		if err != nil {
+			return nil, fmt.Errorf("create RinkoAI image request body: %w", err)
+		}
+		defer closer.Close()
+		return channel.DoApiRequest(a, c, info, body)
+	}
+
 	// Use the outer adaptor so GetRequestURL above is used by DoApiRequest.
 	return channel.DoApiRequest(a, c, info, requestBody)
 }
