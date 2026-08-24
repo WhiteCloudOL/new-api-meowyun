@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -190,12 +191,28 @@ func channelSupportsRequestPath(channel *model.Channel, requestPath string, requ
 // - application/x-www-form-urlencoded
 // - multipart/form-data
 func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
-	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
+	contentType := c.Request.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "application/json") {
 		modelRequest, err := getModelFromJSONBody(c)
 		if err != nil {
 			return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 		}
 		return modelRequest, nil
+	}
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		form, err := common.ParseMultipartFormReusable(c)
+		if err != nil {
+			return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
+		}
+		c.Request.MultipartForm = form
+		c.Request.PostForm = url.Values(form.Value)
+		getValue := func(name string) string {
+			if values := form.Value[name]; len(values) > 0 {
+				return values[0]
+			}
+			return ""
+		}
+		return &ModelRequest{Model: getValue("model"), Group: getValue("group")}, nil
 	}
 
 	var modelRequest ModelRequest
