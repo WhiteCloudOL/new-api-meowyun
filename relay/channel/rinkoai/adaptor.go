@@ -16,6 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/newapi"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -94,6 +95,23 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 		if err != nil {
 			return nil, fmt.Errorf("marshal RinkoAI image request: %w", err)
 		}
+		var wire struct {
+			Model string `json:"model"`
+		}
+		_ = common.Unmarshal(jsonData, &wire)
+		requestModel := ""
+		if imageRequest != nil {
+			requestModel = imageRequest.Model
+		}
+		logger.LogInfo(c, fmt.Sprintf(
+			"RinkoAI NAI image final request: type=%T request_model=%q converted_model=%q origin_model=%q upstream_model=%q context_model=%q",
+			info.Request,
+			requestModel,
+			wire.Model,
+			info.OriginModelName,
+			info.UpstreamModelName,
+			c.GetString("model"),
+		))
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return nil, fmt.Errorf("create RinkoAI image request body: %w", err)
