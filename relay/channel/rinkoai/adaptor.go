@@ -158,6 +158,20 @@ func resolveImageModel(c *gin.Context, info *relaycommon.RelayInfo, request dto.
 		if model == "" {
 			model = strings.TrimSpace(c.Request.FormValue("model"))
 		}
+		if model == "" {
+			model = strings.TrimSpace(c.Request.PostForm.Get("model"))
+		}
+	}
+	if model == "" && c != nil {
+		for _, candidate := range []string{
+			c.GetString("model"),
+			common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		} {
+			if candidate = strings.TrimSpace(candidate); candidate != "" {
+				model = candidate
+				break
+			}
+		}
 	}
 	if model == "" && info != nil {
 		model = strings.TrimSpace(info.UpstreamModelName)
