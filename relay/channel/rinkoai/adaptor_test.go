@@ -114,8 +114,10 @@ func TestConvertNAIImageEditAcceptsBase64JSONInput(t *testing.T) {
 func TestDoRequestRebuildsNAIImageBodyFromOriginalRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var gotBody []byte
+	var gotContentType string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotBody, _ = io.ReadAll(r.Body)
+		gotContentType = r.Header.Get("Content-Type")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"data:image/png;base64,iVBORw0KGgo="}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
 	}))
@@ -136,6 +138,7 @@ func TestDoRequestRebuildsNAIImageBodyFromOriginalRequest(t *testing.T) {
 			ChannelType:       constant.ChannelTypeRinkoAI,
 			ChannelBaseUrl:    server.URL,
 			ApiKey:            "test-key",
+			ChannelSetting:    dto.ChannelSettings{PassThroughBodyEnabled: true},
 			UpstreamModelName: "nai-diffusion-5-full",
 		},
 	}
@@ -144,8 +147,63 @@ func TestDoRequestRebuildsNAIImageBodyFromOriginalRequest(t *testing.T) {
 	require.NoError(t, err)
 	var body dto.GeneralOpenAIRequest
 	require.NoError(t, common.Unmarshal(gotBody, &body))
+	assert.Equal(t, "application/json", gotContentType)
 	assert.Equal(t, "nai-diffusion-5-full", body.Model)
 	assert.Equal(t, "edit this image", body.Messages[0].StringContent())
+}
+
+func TestSetupRequestHeaderForcesJSONForNAIImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewBufferString("multipart"))
+	c.Request.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		OriginModelName: "nai-diffusion-5-full",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeRinkoAI,
+			ChannelBaseUrl:    "https://upstream.example",
+			ApiKey:            "test-key",
+			UpstreamModelName: "nai-diffusion-5-full",
+			ChannelSetting:    dto.ChannelSettings{},
+		},
+	}
+
+	headers := make(http.Header)
+	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &headers, info))
+	assert.Equal(t, "application/json", headers.Get("Content-Type"))
+}
+
+func TestDoRequestPreservesAlreadyConvertedParameterOverrides(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"data:image/png;base64,iVBORw0KGgo="}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString("original request"))
+	c.Request.Header.Set("Content-Type", "application/json")
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesGenerations,
+		OriginModelName: "nai-diffusion-5-full",
+		Request:         &dto.ImageRequest{Model: "nai-diffusion-5-full", Prompt: "draw"},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeRinkoAI,
+			ChannelBaseUrl:    server.URL,
+			ApiKey:            "test-key",
+			UpstreamModelName: "nai-diffusion-5-full",
+		},
+	}
+
+	_, err := (&Adaptor{}).DoRequest(c, info, bytes.NewBufferString(`{"model":"nai-diffusion-5-full","messages":[{"role":"user","content":"draw"}],"temperature":0.25}`))
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, common.Unmarshal(gotBody, &body))
+	assert.Equal(t, float64(0.25), body["temperature"])
 }
 
 func TestGetRequestURLKeepsNormalNewAPIForwarding(t *testing.T) {

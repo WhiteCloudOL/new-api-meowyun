@@ -16,7 +16,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/newapi"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -25,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -60,6 +60,18 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	return a.Adaptor.GetRequestURL(info)
 }
 
+func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
+	if err := a.Adaptor.SetupRequestHeader(c, req, info); err != nil {
+		return err
+	}
+	if isNAIImage(info) {
+		// The downstream image edit may be multipart, but the adapter has
+		// converted it to a JSON chat-completion request for Rinko.
+		req.Set("Content-Type", "application/json")
+	}
+	return nil
+}
+
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	model := resolveImageModel(c, info, request)
 	if !IsNAIModel(model) && !isNAIModelFromInfo(info) {
@@ -83,10 +95,17 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 	}
 
 	// ImageHelper may intentionally preserve the original request body when
-	// pass-through is enabled. NAI image requests must always reach Rinko as a
-	// JSON chat-completion request, so rebuild the body at the final send point
-	// instead of allowing an original multipart body to leak upstream.
-	if imageRequest, ok := info.Request.(*dto.ImageRequest); ok {
+	// pass-through is enabled. Rebuild only in that case; otherwise keep the
+	// already-converted body so channel parameter overrides are preserved.
+	passThrough := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	if info.ChannelMeta != nil {
+		passThrough = passThrough || info.ChannelSetting.PassThroughBodyEnabled
+	}
+	if passThrough {
+		imageRequest, ok := info.Request.(*dto.ImageRequest)
+		if !ok {
+			return nil, fmt.Errorf("invalid RinkoAI image request type: %T", info.Request)
+		}
 		converted, err := convertNAIImageRequest(c, info, *imageRequest)
 		if err != nil {
 			return nil, err
@@ -95,23 +114,10 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 		if err != nil {
 			return nil, fmt.Errorf("marshal RinkoAI image request: %w", err)
 		}
-		var wire struct {
-			Model string `json:"model"`
+		jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+		if err != nil {
+			return nil, fmt.Errorf("apply RinkoAI image parameter override: %w", err)
 		}
-		_ = common.Unmarshal(jsonData, &wire)
-		requestModel := ""
-		if imageRequest != nil {
-			requestModel = imageRequest.Model
-		}
-		logger.LogInfo(c, fmt.Sprintf(
-			"RinkoAI NAI image final request: type=%T request_model=%q converted_model=%q origin_model=%q upstream_model=%q context_model=%q",
-			info.Request,
-			requestModel,
-			wire.Model,
-			info.OriginModelName,
-			info.UpstreamModelName,
-			c.GetString("model"),
-		))
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return nil, fmt.Errorf("create RinkoAI image request body: %w", err)
