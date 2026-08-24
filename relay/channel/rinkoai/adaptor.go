@@ -3,6 +3,7 @@ package rinkoai
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -86,7 +87,15 @@ func (a *Adaptor) GetChannelName() string {
 func isNAIImage(info *relaycommon.RelayInfo) bool {
 	return info != nil &&
 		(info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits) &&
-		isNAIModelFromInfo(info)
+		(isNAIModelFromInfo(info) || isNAIModelFromRequest(info))
+}
+
+func isNAIModelFromRequest(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.Request == nil {
+		return false
+	}
+	request, ok := info.Request.(*dto.ImageRequest)
+	return ok && IsNAIModel(request.Model)
 }
 
 func isNAIModelFromInfo(info *relaycommon.RelayInfo) bool {
@@ -97,6 +106,17 @@ func isNAIModelFromInfo(info *relaycommon.RelayInfo) bool {
 }
 
 func convertNAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	model := strings.TrimSpace(request.Model)
+	if model == "" && info != nil {
+		model = strings.TrimSpace(info.UpstreamModelName)
+	}
+	if model == "" && info != nil {
+		model = strings.TrimSpace(info.OriginModelName)
+	}
+	if model == "" {
+		return nil, fmt.Errorf("model is required for RinkoAI image requests")
+	}
+
 	content := any(request.Prompt)
 	if info != nil && info.RelayMode == relayconstant.RelayModeImagesEdits {
 		imageData, err := getInputImageDataURI(c, request)
@@ -113,7 +133,7 @@ func convertNAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 
 	stream := false
 	return &dto.GeneralOpenAIRequest{
-		Model: request.Model,
+		Model: model,
 		Messages: []dto.Message{{
 			Role:    "user",
 			Content: content,
@@ -125,9 +145,15 @@ func convertNAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func getInputImageDataURI(c *gin.Context, request dto.ImageRequest) (string, error) {
-	if len(request.Image) > 0 {
-		var imageData string
-		if err := common.Unmarshal(request.Image, &imageData); err == nil {
+	for _, raw := range []json.RawMessage{request.Image, request.Images} {
+		if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			continue
+		}
+		imageData, err := parseImageInput(raw)
+		if err != nil {
+			return "", err
+		}
+		if imageData != "" {
 			return imageData, nil
 		}
 	}
@@ -173,6 +199,70 @@ func getInputImageDataURI(c *gin.Context, request dto.ImageRequest) (string, err
 	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
+func parseImageInput(raw json.RawMessage) (string, error) {
+	var value any
+	if err := common.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("invalid image input: %w", err)
+	}
+	return findImageInput(value)
+}
+
+func findImageInput(value any) (string, error) {
+	switch typed := value.(type) {
+	case string:
+		return normalizeImageInput(typed)
+	case []any:
+		for _, item := range typed {
+			imageData, err := findImageInput(item)
+			if err != nil {
+				return "", err
+			}
+			if imageData != "" {
+				return imageData, nil
+			}
+		}
+	case map[string]any:
+		for _, key := range []string{"image_url", "url", "image", "data"} {
+			if nested, ok := typed[key]; ok {
+				imageData, err := findImageInput(nested)
+				if err != nil {
+					return "", err
+				}
+				if imageData != "" {
+					return imageData, nil
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
+func normalizeImageInput(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+		return value, nil
+	}
+	if strings.HasPrefix(strings.ToLower(value), "data:") {
+		match := imageDataURIRegexp.FindStringSubmatch(value)
+		if len(match) != 3 {
+			return "", fmt.Errorf("invalid image data URI")
+		}
+		decoded, err := decodeImageBase64(match[2])
+		if err != nil {
+			return "", fmt.Errorf("invalid image data URI: %w", err)
+		}
+		return "data:" + match[1] + ";base64," + base64.StdEncoding.EncodeToString(decoded), nil
+	}
+	decoded, err := decodeImageBase64(value)
+	if err != nil {
+		return "", fmt.Errorf("image input must be a data URI, base64 string, or HTTP(S) URL: %w", err)
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(decoded), nil
+}
+
 func handleNAIImageResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("empty RinkoAI response"), types.ErrorCodeBadResponse, http.StatusBadGateway)
@@ -195,7 +285,9 @@ func handleNAIImageResponse(c *gin.Context, resp *http.Response, info *relaycomm
 		return nil, types.NewOpenAIError(fmt.Errorf("RinkoAI response has no choices"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 	}
 
-	match := imageDataURIRegexp.FindStringSubmatch(upstream.Choices[0].Message.StringContent())
+	// Search the complete JSON response so both string content (including
+	// Markdown) and multimodal content arrays are accepted.
+	match := imageDataURIRegexp.FindStringSubmatch(string(body))
 	if len(match) != 3 {
 		return nil, types.NewOpenAIError(fmt.Errorf("RinkoAI response does not contain a base64 image data URI"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 	}

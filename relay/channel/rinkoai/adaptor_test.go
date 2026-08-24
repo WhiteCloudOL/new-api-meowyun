@@ -2,7 +2,9 @@ package rinkoai
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,6 +55,60 @@ func TestConvertNAIImageRequestUsesChatCompletionShape(t *testing.T) {
 	body, err := common.Marshal(chatRequest)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"model":"nai-diffusion-5-full","messages":[{"role":"user","content":"a small red fox"}],"stream":false}`, string(body))
+}
+
+func TestConvertNAIImageEditMultipartUsesFallbackModelAndImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("prompt", "edit this image"))
+	part, err := writer.CreateFormFile("image", "input.png")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("fake image"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		OriginModelName: "nai-diffusion-5-full",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
+
+	converted, err := convertNAIImageRequest(c, info, dto.ImageRequest{Prompt: "edit this image"})
+	require.NoError(t, err)
+	chatRequest, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	assert.Equal(t, "nai-diffusion-5-full", chatRequest.Model)
+
+	encoded, err := common.Marshal(chatRequest)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"type":"image_url"`)
+	assert.Contains(t, string(encoded), `data:image/png;base64,ZmFrZSBpbWFnZQ==`)
+}
+
+func TestConvertNAIImageEditAcceptsBase64JSONInput(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		OriginModelName: "nai-diffusion-5-full",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "nai-diffusion-5-full",
+		},
+	}
+	request := dto.ImageRequest{
+		Prompt: "edit this image",
+		Image:  json.RawMessage(`"ZmFrZSBpbWFnZQ=="`),
+	}
+
+	converted, err := convertNAIImageRequest(nil, info, request)
+	require.NoError(t, err)
+	chatRequest, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	encoded, err := common.Marshal(chatRequest)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `data:image/png;base64,ZmFrZSBpbWFnZQ==`)
 }
 
 func TestGetRequestURLKeepsNormalNewAPIForwarding(t *testing.T) {
