@@ -164,6 +164,17 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models',
     },
   },
+  61: {
+    id: 61,
+    name: CHANNEL_TYPES[61],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://api.rinko.ai',
+    hints: {
+      baseUrl: 'Default: https://api.rinko.ai',
+      key: 'Enter RinkoAI API key for this channel',
+      models: 'nai-diffusion-5-full,nai-diffusion-5-curated',
+    },
+  },
 }
 
 /**

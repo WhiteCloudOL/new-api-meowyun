@@ -1,0 +1,246 @@
+package rinkoai
+
+import (
+	"bytes"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/relay/channel"
+	"github.com/QuantumNous/new-api/relay/channel/newapi"
+	"github.com/QuantumNous/new-api/relay/channel/openai"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
+
+	"github.com/gin-gonic/gin"
+)
+
+// Adaptor keeps the normal New API forwarding behavior for all models and
+// endpoints. NAI diffusion models are the one exception: Rinko exposes them
+// through chat completions, so the image endpoint is converted to chat and
+// the returned image data URI is converted back to OpenAI's image schema.
+type Adaptor struct {
+	newapi.Adaptor
+}
+
+var imageDataURIRegexp = regexp.MustCompile(`(?i)data:(image/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=_-]+)`)
+
+type imageResponse struct {
+	Data    []imageResponseData `json:"data"`
+	Created int64               `json:"created"`
+}
+
+type imageResponseData struct {
+	B64JSON       string `json:"b64_json,omitempty"`
+	RevisedPrompt string `json:"revised_prompt,omitempty"`
+}
+
+func IsNAIModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "nai-")
+}
+
+func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if isNAIImage(info) {
+		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/chat/completions", info.ChannelType), nil
+	}
+	return a.Adaptor.GetRequestURL(info)
+}
+
+func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	if !IsNAIModel(request.Model) && !isNAIModelFromInfo(info) {
+		return a.Adaptor.ConvertImageRequest(c, info, request)
+	}
+	return convertNAIImageRequest(c, info, request)
+}
+
+func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	// Use the outer adaptor so GetRequestURL above is used by DoApiRequest.
+	return channel.DoApiRequest(a, c, info, requestBody)
+}
+
+func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	if !isNAIImage(info) {
+		return a.Adaptor.DoResponse(c, resp, info)
+	}
+	return handleNAIImageResponse(c, resp, info)
+}
+
+func (a *Adaptor) GetModelList() []string {
+	return ModelList
+}
+
+func (a *Adaptor) GetChannelName() string {
+	return ChannelName
+}
+
+func isNAIImage(info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		(info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits) &&
+		isNAIModelFromInfo(info)
+}
+
+func isNAIModelFromInfo(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	return IsNAIModel(info.UpstreamModelName) || IsNAIModel(info.OriginModelName)
+}
+
+func convertNAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	content := any(request.Prompt)
+	if info != nil && info.RelayMode == relayconstant.RelayModeImagesEdits {
+		imageData, err := getInputImageDataURI(c, request)
+		if err != nil {
+			return nil, err
+		}
+		if imageData != "" {
+			content = []dto.MediaContent{
+				{Type: "text", Text: request.Prompt},
+				{Type: "image_url", ImageUrl: map[string]string{"url": imageData}},
+			}
+		}
+	}
+
+	stream := false
+	return &dto.GeneralOpenAIRequest{
+		Model: request.Model,
+		Messages: []dto.Message{{
+			Role:    "user",
+			Content: content,
+		}},
+		// Rinko's NAI endpoint returns one complete image. The downstream
+		// image stream is generated from this complete response when requested.
+		Stream: &stream,
+	}, nil
+}
+
+func getInputImageDataURI(c *gin.Context, request dto.ImageRequest) (string, error) {
+	if len(request.Image) > 0 {
+		var imageData string
+		if err := common.Unmarshal(request.Image, &imageData); err == nil {
+			return imageData, nil
+		}
+	}
+	if c == nil || c.Request == nil {
+		return "", nil
+	}
+
+	form := c.Request.MultipartForm
+	if form == nil {
+		var err error
+		form, err = common.ParseMultipartFormReusable(c)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse image edit form: %w", err)
+		}
+		c.Request.MultipartForm = form
+	}
+
+	files := form.File["image"]
+	if len(files) == 0 {
+		files = form.File["image[]"]
+	}
+	if len(files) == 0 {
+		return "", nil
+	}
+
+	file, err := files[0].Open()
+	if err != nil {
+		return "", fmt.Errorf("failed to open input image: %w", err)
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read input image: %w", err)
+	}
+	contentType := files[0].Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = mime.TypeByExtension(filepath.Ext(files[0].Filename))
+	}
+	if !strings.HasPrefix(contentType, "image/") {
+		contentType = "image/png"
+	}
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
+func handleNAIImageResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
+	if resp == nil || resp.Body == nil {
+		return nil, types.NewOpenAIError(fmt.Errorf("empty RinkoAI response"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+	}
+
+	body, readErr := io.ReadAll(resp.Body)
+	service.CloseResponseBodyGracefully(resp)
+	if readErr != nil {
+		return nil, types.NewOpenAIError(readErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
+	}
+
+	var upstream dto.OpenAITextResponse
+	if err := common.Unmarshal(body, &upstream); err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
+	if upstreamError := upstream.GetOpenAIError(); upstreamError != nil && upstreamError.Type != "" {
+		return nil, types.WithOpenAIError(*upstreamError, resp.StatusCode)
+	}
+	if len(upstream.Choices) == 0 {
+		return nil, types.NewOpenAIError(fmt.Errorf("RinkoAI response has no choices"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
+
+	match := imageDataURIRegexp.FindStringSubmatch(upstream.Choices[0].Message.StringContent())
+	if len(match) != 3 {
+		return nil, types.NewOpenAIError(fmt.Errorf("RinkoAI response does not contain a base64 image data URI"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
+	decoded, err := decodeImageBase64(match[2])
+	if err != nil {
+		return nil, types.NewOpenAIError(fmt.Errorf("invalid RinkoAI image data: %w", err), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
+
+	imageBody, err := common.Marshal(imageResponse{
+		Data:    []imageResponseData{{B64JSON: base64.StdEncoding.EncodeToString(decoded)}},
+		Created: time.Now().Unix(),
+	})
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+
+	// The upstream chat call produced one image, regardless of a requested n.
+	// Keep billing aligned with the number actually returned to the client.
+	if info != nil {
+		info.PriceData.AddOtherRatio("n", 1)
+	}
+
+	resp.StatusCode = http.StatusOK
+	if resp.Header == nil {
+		resp.Header = make(http.Header)
+	}
+	resp.Header.Set("Content-Type", "application/json")
+	resp.Body = io.NopCloser(bytes.NewReader(imageBody))
+	if info != nil && info.IsStream {
+		return openai.OpenaiImageStreamHandler(c, info, resp)
+	}
+	service.IOCopyBytesGracefully(c, resp, imageBody)
+	return &upstream.Usage, nil
+}
+
+func decodeImageBase64(value string) ([]byte, error) {
+	for _, encoding := range []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	} {
+		if decoded, err := encoding.DecodeString(value); err == nil {
+			return decoded, nil
+		}
+	}
+	return nil, fmt.Errorf("unsupported base64 encoding")
+}

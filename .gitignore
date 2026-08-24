@@ -10,6 +10,7 @@ build
 logs
 web/dist
 web/node_modules
+web/pnpm-lock.yaml
 .env
 one-api
 new-api
@@ -34,6 +35,12 @@ electron/dist
 token_estimator_test.go
 skills-lock.json
 .playwright-mcp
+
+# Production backups and local deployment artifacts.
+.server-backups/
+*.sql
+*.sql.gz
+*.dump
 
 # Local-only live probes and scratch test workspaces.
 .local-tests/
