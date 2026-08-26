@@ -31,6 +31,8 @@ export type TierConditionInput = {
 export type VisualTier = {
   label: string
   conditions: TierConditionInput[]
+  /** An advanced condition that cannot be represented by the basic inputs. */
+  condition_expr?: string
   input_unit_cost: number
   output_unit_cost: number
   cache_mode: CacheMode
@@ -112,6 +114,12 @@ function buildConditionStr(conditions: TierConditionInput[]): string {
     .join(' && ')
 }
 
+function buildVisualTierCondition(tier: VisualTier): string {
+  const advancedCondition = tier.condition_expr?.trim()
+  if (advancedCondition) return advancedCondition
+  return buildConditionStr(tier.conditions)
+}
+
 function buildTierBodyExpr(tier: VisualTier): string {
   const parts: string[] = []
   const ic = Number(tier.input_unit_cost) || 0
@@ -137,7 +145,7 @@ export function generateExprFromVisualConfig(
     const tier = tiers[0]
     const label = tier.label || 'default'
     const body = `tier("${label}", ${buildTierBodyExpr(tier)})`
-    const cond = buildConditionStr(tier.conditions)
+    const cond = buildVisualTierCondition(tier)
     if (cond) {
       return `${cond} ? ${body} : p * 0 + c * 0`
     }
@@ -149,7 +157,7 @@ export function generateExprFromVisualConfig(
     const tier = tiers[i]
     const label = tier.label || `tier_${i + 1}`
     const body = `tier("${label}", ${buildTierBodyExpr(tier)})`
-    const cond = buildConditionStr(tier.conditions)
+    const cond = buildVisualTierCondition(tier)
 
     if (i < tiers.length - 1 && cond) {
       parts.push(`${cond} ? ${body}`)
@@ -176,6 +184,70 @@ export function tryParseVisualConfig(
     const bodyPat = `p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCacheStr}`
 
     const singleRe = new RegExp(`^tier\\("([^"]*)",\\s*${bodyPat}\\)$`)
+
+    const parseTier = (value: string): VisualTier | null => {
+      const match = value.trim().match(singleRe)
+      if (!match) return null
+      const tier: Record<string, unknown> = {
+        conditions: [],
+        input_unit_cost: Number(match[2]),
+        output_unit_cost: Number(match[3]),
+        label: match[1],
+      }
+      BILLING_CACHE_VAR_MAP.forEach((cv, i) => {
+        const cacheValue = match[4 + i]
+        if (cacheValue != null) tier[cv.field] = Number(cacheValue)
+      })
+      return normalizeVisualTier(tier as Partial<VisualTier>)
+    }
+
+    const splitTopLevelTernary = (value: string) => {
+      let depth = 0
+      let questionIndex = -1
+      let quote = ''
+      for (let i = 0; i < value.length; i += 1) {
+        const char = value[i]
+        if (quote) {
+          if (char === quote && value[i - 1] !== '\\') quote = ''
+          continue
+        }
+        if (char === '"' || char === "'") {
+          quote = char
+          continue
+        }
+        if (char === '(') {
+          depth += 1
+          continue
+        }
+        if (char === ')') {
+          depth -= 1
+          continue
+        }
+        if (depth === 0 && char === '?' && questionIndex < 0) {
+          questionIndex = i
+          continue
+        }
+        if (depth === 0 && char === ':' && questionIndex >= 0) {
+          return {
+            condition: value.slice(0, questionIndex).trim(),
+            whenTrue: value.slice(questionIndex + 1, i).trim(),
+            whenFalse: value.slice(i + 1).trim(),
+          }
+        }
+      }
+      return null
+    }
+
+    const ternary = splitTopLevelTernary(body)
+    if (ternary) {
+      const whenTrue = parseTier(ternary.whenTrue)
+      const whenFalse = parseTier(ternary.whenFalse)
+      if (whenTrue && whenFalse && ternary.condition) {
+        whenTrue.condition_expr = ternary.condition
+        return normalizeVisualConfig({ tiers: [whenTrue, whenFalse] })
+      }
+    }
+
     const simple = body.match(singleRe)
     if (simple) {
       const tier: Record<string, unknown> = {

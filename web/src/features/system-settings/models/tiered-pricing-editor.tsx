@@ -622,7 +622,7 @@ function VisualTierCard({
           <Badge variant='outline'>
             {t('Tier')} {index + 1} / {total}
           </Badge>
-          {tier.conditions.length === 0 && (
+          {tier.conditions.length === 0 && !tier.condition_expr && (
             <Badge variant='secondary'>{t('Fallback tier')}</Badge>
           )}
           <Input
@@ -653,14 +653,29 @@ function VisualTierCard({
             variant='ghost'
             size='sm'
             onClick={onAddCondition}
-            disabled={tier.conditions.length >= 2}
+            disabled={
+              Boolean(tier.condition_expr) || tier.conditions.length >= 2
+            }
             className='h-7 px-2 text-xs'
           >
             <Plus className='mr-1 h-3 w-3' />
             {t('Add condition')}
           </Button>
         </div>
-        {tier.conditions.length === 0 ? (
+        {tier.condition_expr ? (
+          <Input
+            value={tier.condition_expr}
+            onChange={(event) =>
+              onChange({
+                ...tier,
+                condition_expr: event.target.value,
+                conditions: [],
+              })
+            }
+            className='font-mono text-xs'
+            placeholder='hour("Asia/Shanghai") >= 9'
+          />
+        ) : tier.conditions.length === 0 ? (
           <p className='text-muted-foreground text-xs'>
             {t('Always matches (default tier).')}
           </p>
@@ -817,7 +832,7 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
 
   const handleAddCondition = (index: number) => {
     const tier = config.tiers[index]
-    if (tier.conditions.length >= 2) return
+    if (tier.condition_expr || tier.conditions.length >= 2) return
     // Prefer `len` (input length) over `p`/`c` for tier conditions because
     // `p` is subject to auto-exclusion when sub-categories like `cr` are
     // priced separately, which can misroute long-input requests into shorter
@@ -1649,10 +1664,13 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
   const [requestRuleGroups, setRequestRuleGroups] = useState<
     RequestRuleGroup[]
   >(() => tryParseRequestRuleExpr(currentRequestRuleExpr) || [])
+  const visualTouchedRef = useRef(false)
   const initRef = useRef(false)
 
   useEffect(() => {
-    if (initRef.current) return
+    // Allow a late-arriving pricing fallback to initialize the visual editor,
+    // but do not reinitialize after the user has edited the visual form.
+    if (initRef.current && visualTouchedRef.current) return
     initRef.current = true
     const parsedConfig = tryParseVisualConfig(currentExpr)
     if (parsedConfig) {
@@ -1665,6 +1683,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
     } else {
       setVisualConfig(createDefaultVisualConfig())
     }
+    visualTouchedRef.current = false
     setRawExpr(
       combineBillingExpr(currentExpr || '', currentRequestRuleExpr || '')
     )
@@ -1673,6 +1692,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
 
   useEffect(() => {
     initRef.current = false
+    visualTouchedRef.current = false
   }, [modelName])
 
   const canUseVisualRules = useMemo(() => {
@@ -1682,11 +1702,12 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
 
   const effectiveExpr = useMemo(() => {
     if (editorMode === 'visual') {
+      if (!visualTouchedRef.current) return currentExpr || ''
       return generateExprFromVisualConfig(visualConfig)
     }
     const { billingExpr } = splitBillingExprAndRequestRules(rawExpr)
     return billingExpr
-  }, [editorMode, visualConfig, rawExpr])
+  }, [editorMode, visualConfig, rawExpr, currentExpr])
 
   useEffect(() => {
     if (effectiveExpr !== currentExpr) {
@@ -1708,6 +1729,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
   ])
 
   const handleVisualChange = useCallback((next: VisualConfig) => {
+    visualTouchedRef.current = true
     setVisualConfig(next)
   }, [])
 
@@ -1736,13 +1758,21 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
         setRequestRuleGroups(parsedGroups || [])
         onRequestRuleExprChange(ruleStr)
       } else {
-        const expr = generateExprFromVisualConfig(visualConfig)
+        const expr = visualTouchedRef.current
+          ? generateExprFromVisualConfig(visualConfig)
+          : currentExpr
         const ruleExpr = buildRequestRuleExpr(requestRuleGroups)
         setRawExpr(combineBillingExpr(expr, ruleExpr) || expr)
       }
       setEditorMode(next)
     },
-    [rawExpr, visualConfig, requestRuleGroups, onRequestRuleExprChange]
+    [
+      rawExpr,
+      visualConfig,
+      requestRuleGroups,
+      currentExpr,
+      onRequestRuleExprChange,
+    ]
   )
 
   const applyPreset = useCallback(
@@ -1750,6 +1780,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
       const presetGroups = preset.requestRules || []
       const ruleExpr = buildRequestRuleExpr(presetGroups)
       const combined = combineBillingExpr(preset.expr, ruleExpr) || preset.expr
+      visualTouchedRef.current = true
       setRawExpr(combined)
       const parsed = tryParseVisualConfig(preset.expr)
       if (parsed) {
