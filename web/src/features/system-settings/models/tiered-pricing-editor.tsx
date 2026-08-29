@@ -87,9 +87,12 @@ import {
   CACHE_MODE_TIMED,
   type CacheMode,
   type ExtraTokenValues,
+  type TimeTierCondition,
+  type TimeTierWindow,
   type TierConditionInput,
   type VisualConfig,
   type VisualTier,
+  buildTimeTierCondition,
   createDefaultVisualConfig,
   evalExprLocally,
   exprUsesExtraVars,
@@ -97,6 +100,7 @@ import {
   getTierCacheMode,
   normalizeVisualConfig,
   normalizeVisualTier,
+  parseTimeTierCondition,
   tryParseVisualConfig,
 } from '@/features/pricing/lib/tier-expr'
 import { cn } from '@/lib/utils'
@@ -545,6 +549,7 @@ type VisualTierCardProps = {
   onChange: (next: VisualTier) => void
   onRemove: () => void
   onAddCondition: () => void
+  onAddTimeCondition: () => void
 }
 
 function VisualTierCard({
@@ -554,9 +559,14 @@ function VisualTierCard({
   onChange,
   onRemove,
   onAddCondition,
+  onAddTimeCondition,
 }: VisualTierCardProps) {
   const { t } = useTranslation()
   const cacheMode = getTierCacheMode(tier)
+  const timeCondition = useMemo(
+    () => parseTimeTierCondition(tier.condition_expr),
+    [tier.condition_expr]
+  )
 
   const handleConditionChange = (
     conditionIndex: number,
@@ -571,6 +581,65 @@ function VisualTierCard({
     onChange({
       ...tier,
       conditions: tier.conditions.filter((_, i) => i !== conditionIndex),
+    })
+  }
+
+  const handleTimeConditionChange = (next: TimeTierCondition) => {
+    onChange({
+      ...tier,
+      condition_expr: buildTimeTierCondition(next),
+      conditions: [],
+    })
+  }
+
+  const handleTimeWindowChange = (
+    windowIndex: number,
+    field: keyof TimeTierWindow,
+    value: number
+  ) => {
+    if (!timeCondition) return
+    const currentWindow = timeCondition.windows[windowIndex]
+    if (!currentWindow) return
+    const maxValue = field === 'startHour' ? 23 : 24
+    let nextValue = Math.max(0, Math.min(maxValue, Math.trunc(value)))
+    const otherValue =
+      field === 'startHour' ? currentWindow.endHour : currentWindow.startHour
+    if (nextValue === otherValue) {
+      if (field === 'startHour') {
+        nextValue = otherValue === 0 ? 23 : otherValue - 1
+      } else {
+        nextValue = otherValue === 23 ? 24 : otherValue + 1
+      }
+    }
+    const windows = timeCondition.windows.map((window, index) =>
+      index === windowIndex
+        ? {
+            ...window,
+            [field]: nextValue,
+          }
+        : window
+    )
+    handleTimeConditionChange({ ...timeCondition, windows })
+  }
+
+  const handleTimeWindowRemove = (windowIndex: number) => {
+    if (!timeCondition || timeCondition.windows.length <= 1) return
+    handleTimeConditionChange({
+      ...timeCondition,
+      windows: timeCondition.windows.filter(
+        (_, index) => index !== windowIndex
+      ),
+    })
+  }
+
+  const handleTimeWindowAdd = () => {
+    if (!timeCondition || timeCondition.windows.length >= 4) return
+    const previous = timeCondition.windows.at(-1)
+    const startHour = Math.min(previous?.endHour ?? 9, 23)
+    const endHour = Math.min(startHour + 1, 24)
+    handleTimeConditionChange({
+      ...timeCondition,
+      windows: [...timeCondition.windows, { startHour, endHour }],
     })
   }
 
@@ -615,6 +684,148 @@ function VisualTierCard({
     )
   }
 
+  const renderTierConditions = () => {
+    if (timeCondition) {
+      return (
+        <div className='bg-muted/30 space-y-2 rounded-md border p-2'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Label className='text-muted-foreground w-14 text-xs'>
+              {t('Time')}
+            </Label>
+            <Select
+              items={COMMON_TIMEZONES.map((timezone) => ({
+                value: timezone.value,
+                label: timezone.label,
+              }))}
+              value={timeCondition.timezone}
+              onValueChange={(value) =>
+                value !== null &&
+                handleTimeConditionChange({
+                  ...timeCondition,
+                  timezone: value,
+                })
+              }
+            >
+              <SelectTrigger className='w-56' size='sm'>
+                <SelectValue>
+                  {COMMON_TIMEZONES.find(
+                    (timezone) => timezone.value === timeCondition.timezone
+                  )?.label ?? timeCondition.timezone}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {COMMON_TIMEZONES.map((timezone) => (
+                    <SelectItem key={timezone.value} value={timezone.value}>
+                      {timezone.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          {timeCondition.windows.map((window, windowIndex) => (
+            <div
+              // The editor only appends/removes ordered windows. Using the
+              // stable position keeps focus while a window value is edited.
+              // oxlint-disable-next-line react/no-array-index-key
+              key={windowIndex}
+              className='flex flex-wrap items-end gap-2'
+            >
+              <Badge variant='outline' className='mb-1 h-6'>
+                {windowIndex + 1}
+              </Badge>
+              <div className='w-28 space-y-0.5'>
+                <Label className='text-muted-foreground text-xs'>
+                  {t('Start')}
+                </Label>
+                <DraftNumberInput
+                  min={0}
+                  max={23}
+                  step={1}
+                  value={window.startHour}
+                  onValueChange={(value) =>
+                    handleTimeWindowChange(windowIndex, 'startHour', value)
+                  }
+                  className='h-8'
+                />
+              </div>
+              <div className='w-28 space-y-0.5'>
+                <Label className='text-muted-foreground text-xs'>
+                  {t('End')}
+                </Label>
+                <DraftNumberInput
+                  min={0}
+                  max={24}
+                  step={1}
+                  value={window.endHour}
+                  onValueChange={(value) =>
+                    handleTimeWindowChange(windowIndex, 'endHour', value)
+                  }
+                  className='h-8'
+                />
+              </div>
+              <Button
+                variant='ghost'
+                size='icon'
+                onClick={() => handleTimeWindowRemove(windowIndex)}
+                disabled={timeCondition.windows.length <= 1}
+                aria-label={t('Remove')}
+                className='h-8 w-8'
+              >
+                <Trash2 className='text-destructive h-4 w-4' />
+              </Button>
+            </div>
+          ))}
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={handleTimeWindowAdd}
+            disabled={timeCondition.windows.length >= 4}
+            className='h-8 text-xs'
+          >
+            <Plus className='mr-1 h-3 w-3' />
+            {t('Add time condition')}
+          </Button>
+        </div>
+      )
+    }
+
+    if (tier.condition_expr) {
+      return (
+        <Input
+          value={tier.condition_expr}
+          onChange={(event) =>
+            onChange({
+              ...tier,
+              condition_expr: event.target.value,
+              conditions: [],
+            })
+          }
+          className='font-mono text-xs'
+          placeholder='hour("Asia/Shanghai") >= 9'
+        />
+      )
+    }
+
+    if (tier.conditions.length === 0) {
+      return (
+        <p className='text-muted-foreground text-xs'>
+          {t('Always matches (default tier).')}
+        </p>
+      )
+    }
+
+    return tier.conditions.map((condition, conditionIndex) => (
+      <ConditionRow
+        key={`${condition.var}-${condition.op}-${condition.value}`}
+        condition={condition}
+        onChange={(next) => handleConditionChange(conditionIndex, next)}
+        onRemove={() => handleConditionRemove(conditionIndex)}
+      />
+    ))
+  }
+
   return (
     <div className='space-y-3 rounded-lg border p-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -649,46 +860,34 @@ function VisualTierCard({
       <div className='space-y-1.5'>
         <div className='flex h-7 items-center justify-between'>
           <Label className='text-xs font-medium'>{t('Tier conditions')}</Label>
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={onAddCondition}
-            disabled={
-              Boolean(tier.condition_expr) || tier.conditions.length >= 2
-            }
-            className='h-7 px-2 text-xs'
-          >
-            <Plus className='mr-1 h-3 w-3' />
-            {t('Add condition')}
-          </Button>
+          <div className='flex items-center gap-1'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={onAddTimeCondition}
+              disabled={
+                Boolean(tier.condition_expr) || tier.conditions.length > 0
+              }
+              className='h-7 px-2 text-xs'
+            >
+              <Plus className='mr-1 h-3 w-3' />
+              {t('Add time condition')}
+            </Button>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={onAddCondition}
+              disabled={
+                Boolean(tier.condition_expr) || tier.conditions.length >= 2
+              }
+              className='h-7 px-2 text-xs'
+            >
+              <Plus className='mr-1 h-3 w-3' />
+              {t('Add condition')}
+            </Button>
+          </div>
         </div>
-        {tier.condition_expr ? (
-          <Input
-            value={tier.condition_expr}
-            onChange={(event) =>
-              onChange({
-                ...tier,
-                condition_expr: event.target.value,
-                conditions: [],
-              })
-            }
-            className='font-mono text-xs'
-            placeholder='hour("Asia/Shanghai") >= 9'
-          />
-        ) : tier.conditions.length === 0 ? (
-          <p className='text-muted-foreground text-xs'>
-            {t('Always matches (default tier).')}
-          </p>
-        ) : (
-          tier.conditions.map((condition, conditionIndex) => (
-            <ConditionRow
-              key={conditionIndex}
-              condition={condition}
-              onChange={(next) => handleConditionChange(conditionIndex, next)}
-              onRemove={() => handleConditionRemove(conditionIndex)}
-            />
-          ))
-        )}
+        {renderTierConditions()}
       </div>
 
       <div className='space-y-2'>
@@ -855,6 +1054,23 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
     })
   }
 
+  const handleAddTimeCondition = (index: number) => {
+    const tier = config.tiers[index]
+    if (tier.condition_expr || tier.conditions.length > 0) return
+    const conditionExpr = buildTimeTierCondition({
+      timezone: 'Asia/Shanghai',
+      windows: [{ startHour: 9, endHour: 18 }],
+    })
+    onChange({
+      ...config,
+      tiers: config.tiers.map((current, currentIndex) =>
+        currentIndex === index
+          ? { ...current, condition_expr: conditionExpr, conditions: [] }
+          : current
+      ),
+    })
+  }
+
   return (
     <div className='space-y-2'>
       <p className='text-muted-foreground text-xs'>
@@ -871,6 +1087,7 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
           onChange={(next) => handleTierChange(index, next)}
           onRemove={() => handleRemoveTier(index)}
           onAddCondition={() => handleAddCondition(index)}
+          onAddTimeCondition={() => handleAddTimeCondition(index)}
         />
       ))}
       <Button
@@ -911,7 +1128,10 @@ function RawExprEditor({ exprString, onChange }: RawExprEditorProps) {
             {t('Functions')}: <code>tier(name, value)</code>, <code>max</code>,{' '}
             <code>min</code>, <code>ceil</code>, <code>floor</code>,{' '}
             <code>abs</code>, <code>header(name)</code>,{' '}
-            <code>param(path)</code>, <code>has(source, text)</code>
+            <code>param(path)</code>, <code>has(source, text)</code>,{' '}
+            <code>hour(tz)</code>, <code>minute(tz)</code>,{' '}
+            <code>weekday(tz)</code>, <code>month(tz)</code>,{' '}
+            <code>day(tz)</code>
           </div>
         </AlertDescription>
       </Alert>

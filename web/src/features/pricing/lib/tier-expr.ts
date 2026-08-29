@@ -28,6 +28,16 @@ export type TierConditionInput = {
   value: number | string
 }
 
+export type TimeTierWindow = {
+  startHour: number
+  endHour: number
+}
+
+export type TimeTierCondition = {
+  timezone: string
+  windows: TimeTierWindow[]
+}
+
 export type VisualTier = {
   label: string
   conditions: TierConditionInput[]
@@ -118,6 +128,81 @@ function buildVisualTierCondition(tier: VisualTier): string {
   const advancedCondition = tier.condition_expr?.trim()
   if (advancedCondition) return advancedCondition
   return buildConditionStr(tier.conditions)
+}
+
+const TIME_TIER_WINDOW_RE =
+  /hour\(\s*(["'])([^"']+)\1\s*\)\s*>=\s*(\d{1,2})\s*(&&|\|\|)\s*hour\(\s*(["'])([^"']+)\5\s*\)\s*<\s*(\d{1,2})/g
+
+export function parseTimeTierCondition(
+  conditionExpr: string | null | undefined
+): TimeTierCondition | null {
+  if (!conditionExpr?.trim()) return null
+
+  const windows: TimeTierWindow[] = []
+  let timezone = ''
+  let match: RegExpExecArray | null
+  TIME_TIER_WINDOW_RE.lastIndex = 0
+
+  while ((match = TIME_TIER_WINDOW_RE.exec(conditionExpr)) !== null) {
+    const currentTimezone = match[2].trim()
+    const repeatedTimezone = match[6].trim()
+    const startHour = Number(match[3])
+    const operator = match[4]
+    const endHour = Number(match[7])
+
+    if (
+      !currentTimezone ||
+      currentTimezone !== repeatedTimezone ||
+      (timezone && timezone !== currentTimezone) ||
+      !Number.isInteger(startHour) ||
+      !Number.isInteger(endHour) ||
+      startHour < 0 ||
+      startHour > 23 ||
+      endHour < 0 ||
+      endHour > 24 ||
+      startHour === endHour ||
+      (startHour < endHour && operator !== '&&') ||
+      (startHour > endHour && operator !== '||')
+    ) {
+      return null
+    }
+
+    timezone = currentTimezone
+    windows.push({ startHour, endHour })
+  }
+
+  if (windows.length === 0) return null
+
+  TIME_TIER_WINDOW_RE.lastIndex = 0
+  const remaining = conditionExpr
+    .replaceAll(TIME_TIER_WINDOW_RE, '__window__')
+    .replaceAll(/[()\s]/g, '')
+  if (!/^__window__(?:\|\|__window__)*$/.test(remaining)) return null
+
+  return { timezone, windows }
+}
+
+export function buildTimeTierCondition(condition: TimeTierCondition): string {
+  const timezone = condition.timezone.trim() || 'UTC'
+  const quotedTimezone = JSON.stringify(timezone)
+  const windows = condition.windows.filter(
+    ({ startHour, endHour }) =>
+      Number.isInteger(startHour) &&
+      Number.isInteger(endHour) &&
+      startHour >= 0 &&
+      startHour <= 23 &&
+      endHour >= 0 &&
+      endHour <= 24 &&
+      startHour !== endHour
+  )
+
+  if (windows.length === 0) return ''
+
+  const parts = windows.map(({ startHour, endHour }) => {
+    const operator = startHour < endHour ? '&&' : '||'
+    return `(hour(${quotedTimezone}) >= ${startHour} ${operator} hour(${quotedTimezone}) < ${endHour})`
+  })
+  return `(${parts.join(' || ')})`
 }
 
 function buildTierBodyExpr(tier: VisualTier): string {
@@ -306,7 +391,7 @@ export function tryParseVisualConfig(
 
     const cfg = normalizeVisualConfig({ tiers })
     const regenerated = generateExprFromVisualConfig(cfg)
-    if (regenerated.replace(/\s+/g, '') !== body.replace(/\s+/g, '')) {
+    if (regenerated.replaceAll(/\s+/g, '') !== body.replaceAll(/\s+/g, '')) {
       return null
     }
     return cfg
@@ -340,11 +425,71 @@ export type EvalResult = {
   error: string | null
 }
 
+type TimeParts = {
+  hour: number
+  minute: number
+  weekday: number
+  month: number
+  day: number
+}
+
+function getUtcTimeParts(now: Date): TimeParts {
+  return {
+    hour: now.getUTCHours(),
+    minute: now.getUTCMinutes(),
+    weekday: now.getUTCDay(),
+    month: now.getUTCMonth() + 1,
+    day: now.getUTCDate(),
+  }
+}
+
+function getTimePartsInZone(timezone: string, now: Date): TimeParts {
+  const normalizedTimezone = timezone.trim()
+  if (!normalizedTimezone) return getUtcTimeParts(now)
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB-u-ca-gregory-nu-latn', {
+      timeZone: normalizedTimezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now)
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== 'literal')
+        .map((part) => [part.type, Number(part.value)])
+    )
+    const year = values.year
+    const month = values.month
+    const day = values.day
+    const hour = values.hour
+    const minute = values.minute
+
+    if (![year, month, day, hour, minute].every(Number.isFinite)) {
+      return getUtcTimeParts(now)
+    }
+
+    return {
+      hour,
+      minute,
+      weekday: new Date(Date.UTC(year, month - 1, day)).getUTCDay(),
+      month,
+      day,
+    }
+  } catch {
+    return getUtcTimeParts(now)
+  }
+}
+
 export function evalExprLocally(
   exprStr: string,
   promptTokens: number,
   completionTokens: number,
-  extraTokenValues: ExtraTokenValues
+  extraTokenValues: ExtraTokenValues,
+  now = new Date()
 ): EvalResult {
   try {
     if (!exprStr || !exprStr.trim()) {
@@ -360,6 +505,16 @@ export function evalExprLocally(
     const cacheCreate1hTokens = extraTokenValues.cacheCreate1hTokens || 0
     const len =
       promptTokens + cacheReadTokens + cacheCreateTokens + cacheCreate1hTokens
+    const timePartsByZone = new Map<string, TimeParts>()
+    const timeParts = (timezone: string) => {
+      const normalizedTimezone = String(timezone ?? '').trim()
+      const cacheKey = normalizedTimezone || 'UTC'
+      const cached = timePartsByZone.get(cacheKey)
+      if (cached) return cached
+      const value = getTimePartsInZone(normalizedTimezone, now)
+      timePartsByZone.set(cacheKey, value)
+      return value
+    }
     const env: Record<string, unknown> = {
       p: promptTokens,
       c: completionTokens,
@@ -370,6 +525,11 @@ export function evalExprLocally(
       abs: Math.abs,
       ceil: Math.ceil,
       floor: Math.floor,
+      hour: (timezone: string) => timeParts(timezone).hour,
+      minute: (timezone: string) => timeParts(timezone).minute,
+      weekday: (timezone: string) => timeParts(timezone).weekday,
+      month: (timezone: string) => timeParts(timezone).month,
+      day: (timezone: string) => timeParts(timezone).day,
     }
     for (const field of ESTIMATOR_VARS) {
       env[field.var] = extraTokenValues[field.stateKey] || 0
