@@ -44,3 +44,76 @@ python -m unittest -v test_app.py
 python -m py_compile app.py test_app.py
 docker build -t meowyun/cosyvoice-openai:local .
 ```
+
+## Deploy with NewAPI
+
+The NewAPI database only stores the channel configuration. Migrating the
+database does **not** migrate this sidecar container. Deploy this service
+separately whenever NewAPI is moved to another host.
+
+Add the following service to the same Compose project as NewAPI:
+
+```yaml
+services:
+  cosyvoice-openai:
+    build:
+      context: ./custom/cosyvoice-openai
+      dockerfile: Dockerfile
+    image: meowyun/cosyvoice-openai:1.1
+    container_name: cosyvoice-openai
+    restart: always
+    environment:
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:?set DASHSCOPE_BASE_URL}
+      NEW_API_BILLING_MODE: characters
+      COSYVOICE_SAMPLE_RATE: "24000"
+      UPSTREAM_TIMEOUT_SECONDS: "120"
+      TZ: Asia/Shanghai
+    expose:
+      - "8080"
+    networks:
+      - new-api-network
+```
+
+Do not add a host `ports` mapping. NewAPI reaches the service over the shared
+Docker network at `http://cosyvoice-openai:8080`; the adapter must not be
+published directly to the Internet.
+
+Build and start only the sidecar without recreating NewAPI:
+
+```bash
+docker compose config --quiet
+docker compose build --pull --no-cache cosyvoice-openai
+docker compose up -d --no-deps cosyvoice-openai
+```
+
+Verify the container and the private-network path:
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' cosyvoice-openai
+docker exec new-api getent hosts cosyvoice-openai
+docker exec new-api wget -qO- http://cosyvoice-openai:8080/healthz
+```
+
+After verification, remove build cache so a migration does not leave several
+gigabytes of temporary layers:
+
+```bash
+docker builder prune -af
+docker system df
+```
+
+## Migration checklist
+
+- Migrate the NewAPI database and confirm the CosyVoice channel still points
+  to `http://cosyvoice-openai:8080`.
+- Confirm `custom/cosyvoice-openai` exists in the destination checkout.
+- Copy the previous deployment's `DASHSCOPE_BASE_URL`; do not put the Alibaba
+  API key in this service because the NewAPI channel forwards it per request.
+- Add `cosyvoice-openai` to the destination Compose project and the same
+  network as NewAPI.
+- Keep port 8080 private; use `expose`, not `ports`.
+- Run the unit tests, build without cache, and wait for a healthy container.
+- Test DNS and `/healthz` from inside the NewAPI container.
+- Send one short `/v1/audio/speech` request through NewAPI before retiring the
+  old sidecar.
+- Clean Docker build cache and confirm NewAPI remains healthy.
