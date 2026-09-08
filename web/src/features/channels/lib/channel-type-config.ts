@@ -164,9 +164,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models',
     },
   },
-  61: {
-    id: 61,
-    name: CHANNEL_TYPES[61],
+  62: {
+    id: 62,
+    name: CHANNEL_TYPES[62],
     icon: 'NewAPI',
     defaultBaseUrl: 'https://api.rinko.ai',
     hints: {

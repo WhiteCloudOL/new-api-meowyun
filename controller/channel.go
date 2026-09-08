@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -420,20 +422,19 @@ func GetChannel(c *gin.Context) {
 // 此函数依赖 SecureVerificationRequired 中间件，确保用户已通过安全验证
 func GetChannelKey(c *gin.Context) {
 	channelId, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		common.ApiError(c, fmt.Errorf("渠道ID格式错误: %v", err))
+	if err != nil || channelId <= 0 {
+		common.ApiErrorMsg(c, "渠道ID格式错误")
 		return
 	}
 
 	// 获取渠道信息（包含密钥）
 	channel, err := model.GetChannelById(channelId, true)
-	if err != nil {
-		common.ApiError(c, fmt.Errorf("获取渠道信息失败: %v", err))
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ApiErrorI18n(c, i18n.MsgChannelNotExists)
 		return
 	}
-
-	if channel == nil {
-		common.ApiError(c, fmt.Errorf("渠道不存在"))
+	if err != nil {
+		writeSecurityOperationError(c, err)
 		return
 	}
 
@@ -453,23 +454,6 @@ func GetChannelKey(c *gin.Context) {
 	})
 }
 
-// validateTwoFactorAuth 统一的2FA验证函数
-func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
-	// 尝试验证TOTP
-	if cleanCode, err := common.ValidateNumericCode(code); err == nil {
-		if isValid, _ := twoFA.ValidateTOTPAndUpdateUsage(cleanCode); isValid {
-			return true
-		}
-	}
-
-	// 尝试验证备用码
-	if isValid, err := twoFA.ValidateBackupCodeAndUpdateUsage(code); err == nil && isValid {
-		return true
-	}
-
-	return false
-}
-
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel == nil {
@@ -479,6 +463,29 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
+	}
+	if channel.Type == constant.ChannelTypeTaskPlugin {
+		pluginKey := strings.TrimSpace(channel.GetSetting().TaskPluginKey)
+		if pluginKey == "" {
+			return fmt.Errorf("task plugin key is required")
+		}
+		if len(pluginKey) > 30 {
+			return fmt.Errorf("task plugin key must not exceed 30 characters")
+		}
+		plugin, ok := jsplugin.DefaultRegistry.Get(pluginKey)
+		if !ok {
+			return fmt.Errorf("task plugin %q is not registered", pluginKey)
+		}
+		if channel.BaseURL == nil || strings.TrimSpace(*channel.BaseURL) == "" {
+			// The plugin default is persisted onto the channel instead of being
+			// resolved per request, so the destination host stays an auditable
+			// channel property that only an administrator edit can change.
+			if plugin.Meta.BaseURL == "" {
+				return fmt.Errorf("base URL is required for task plugin channels")
+			}
+			defaultBaseURL := plugin.Meta.BaseURL
+			channel.BaseURL = &defaultBaseURL
+		}
 	}
 
 	if channel.Type == constant.ChannelTypeNewAPI && strings.TrimSpace(channel.GetBaseURL()) == "" {
@@ -617,6 +624,18 @@ func AddChannel(c *gin.Context) {
 		return
 	}
 
+	if addChannelRequest.Channel != nil && addChannelRequest.Channel.Type == constant.ChannelTypeTaskPlugin &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.TaskPluginBind) {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "task plugin channels require the task_plugin.bind permission",
+		})
+		return
+	}
+
+	baseURLFromPluginDefault := addChannelRequest.Channel != nil &&
+		addChannelRequest.Channel.Type == constant.ChannelTypeTaskPlugin &&
+		(addChannelRequest.Channel.BaseURL == nil || strings.TrimSpace(*addChannelRequest.Channel.BaseURL) == "")
 	// 使用统一的校验函数
 	if err := validateChannel(addChannelRequest.Channel, true); err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -701,11 +720,15 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAudit(c, "channel.create", map[string]interface{}{
+	createAudit := map[string]interface{}{
 		"name":  addChannelRequest.Channel.Name,
 		"type":  addChannelRequest.Channel.Type,
 		"count": len(channels),
-	})
+	}
+	if baseURLFromPluginDefault {
+		createAudit["base_url_source"] = "plugin_default"
+	}
+	recordManageAudit(c, "channel.create", createAudit)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -964,6 +987,17 @@ func UpdateChannel(c *gin.Context) {
 	}
 	clearChannelReadOnlyFields(&channel, requestData)
 
+	if channel.Type == constant.ChannelTypeTaskPlugin &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.TaskPluginBind) {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "task plugin channels require the task_plugin.bind permission",
+		})
+		return
+	}
+
+	baseURLFromPluginDefault := channel.Type == constant.ChannelTypeTaskPlugin &&
+		(channel.BaseURL == nil || strings.TrimSpace(*channel.BaseURL) == "")
 	// 使用统一的校验函数
 	if err := validateChannel(&channel.Channel, false); err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -1109,11 +1143,15 @@ func UpdateChannel(c *gin.Context) {
 	if channel.Key != "" && channel.Key != originChannel.Key {
 		changedFields = append(changedFields, "key")
 	}
-	recordManageAudit(c, "channel.update", map[string]interface{}{
+	updateAudit := map[string]interface{}{
 		"id":             channel.Id,
 		"name":           channel.Name,
 		"changed_fields": changedFields,
-	})
+	}
+	if baseURLFromPluginDefault {
+		updateAudit["base_url_source"] = "plugin_default"
+	}
+	recordManageAudit(c, "channel.update", updateAudit)
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
 	c.JSON(http.StatusOK, gin.H{
@@ -1299,7 +1337,7 @@ func FetchModels(c *gin.Context) {
 			baseURL = strings.TrimSpace(*req.BaseURL)
 		}
 		if baseURL == "" {
-			baseURL = constant.ChannelBaseURLs[req.Type]
+			baseURL = constant.GetChannelBaseURL(req.Type)
 		}
 
 		key := strings.TrimSpace(req.Key)
@@ -1422,6 +1460,11 @@ func CopyChannel(c *gin.Context) {
 	if err != nil {
 		common.SysError("failed to get channel by id: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道信息失败，请稍后重试"})
+		return
+	}
+	if origin.Type == constant.ChannelTypeTaskPlugin &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.TaskPluginBind) {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "task plugin channels require the task_plugin.bind permission"})
 		return
 	}
 
@@ -2010,7 +2053,7 @@ func OllamaPullModel(c *gin.Context) {
 		return
 	}
 
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}
@@ -2073,7 +2116,7 @@ func OllamaPullModelStream(c *gin.Context) {
 		return
 	}
 
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}
@@ -2155,7 +2198,7 @@ func OllamaDeleteModel(c *gin.Context) {
 		return
 	}
 
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}
@@ -2204,7 +2247,7 @@ func OllamaVersion(c *gin.Context) {
 		return
 	}
 
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}

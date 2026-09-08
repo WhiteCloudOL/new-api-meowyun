@@ -22,9 +22,10 @@ func TestGenerateTextOtherInfoIncludesCharacterBilling(t *testing.T) {
 	}
 
 	other := GenerateTextOtherInfo(ctx, relayInfo, 3, 1, 1, 0, 0, 0, 1)
+	snapshot := other.Snapshot()
 
-	assert.Equal(t, "characters", other["billing_unit"])
-	assert.Equal(t, 29, other["billing_characters"])
+	assert.Equal(t, "characters", snapshot["billing_unit"])
+	assert.Equal(t, 29, snapshot["billing_characters"])
 }
 
 func TestGenerateTextOtherInfoOmitsCharacterBillingForNormalRequests(t *testing.T) {
@@ -37,9 +38,10 @@ func TestGenerateTextOtherInfoOmitsCharacterBillingForNormalRequests(t *testing.
 	}
 
 	other := GenerateTextOtherInfo(ctx, relayInfo, 3, 1, 1, 0, 0, 0, 1)
+	snapshot := other.Snapshot()
 
-	assert.NotContains(t, other, "billing_unit")
-	assert.NotContains(t, other, "billing_characters")
+	assert.NotContains(t, snapshot, "billing_unit")
+	assert.NotContains(t, snapshot, "billing_characters")
 }
 
 func TestCharacterBilledTTSUsesTextInputRatio(t *testing.T) {

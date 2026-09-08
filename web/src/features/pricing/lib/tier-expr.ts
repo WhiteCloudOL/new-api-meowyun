@@ -124,6 +124,24 @@ function buildConditionStr(conditions: TierConditionInput[]): string {
     .join(' && ')
 }
 
+function parseBasicTierConditions(
+  conditionExpr: string
+): TierConditionInput[] | null {
+  if (!conditionExpr.trim()) return []
+
+  const conditions: TierConditionInput[] = []
+  for (const part of conditionExpr.split(/\s*&&\s*/)) {
+    const match = part.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
+    if (!match) return null
+    conditions.push({
+      var: match[1] as TierConditionInput['var'],
+      op: match[2] as TierConditionInput['op'],
+      value: Number(match[3]),
+    })
+  }
+  return conditions
+}
+
 function buildVisualTierCondition(tier: VisualTier): string {
   const advancedCondition = tier.condition_expr?.trim()
   if (advancedCondition) return advancedCondition
@@ -328,7 +346,12 @@ export function tryParseVisualConfig(
       const whenTrue = parseTier(ternary.whenTrue)
       const whenFalse = parseTier(ternary.whenFalse)
       if (whenTrue && whenFalse && ternary.condition) {
-        whenTrue.condition_expr = ternary.condition
+        const basicConditions = parseBasicTierConditions(ternary.condition)
+        if (basicConditions) {
+          whenTrue.conditions = basicConditions
+        } else {
+          whenTrue.condition_expr = ternary.condition
+        }
         return normalizeVisualConfig({ tiers: [whenTrue, whenFalse] })
       }
     }
@@ -361,19 +384,7 @@ export function tryParseVisualConfig(
     let match: RegExpExecArray | null
     while ((match = tierRe.exec(body)) !== null) {
       const condStr = match[1] || ''
-      const conditions: TierConditionInput[] = []
-      if (condStr) {
-        for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
-          if (cm) {
-            conditions.push({
-              var: cm[1] as TierConditionInput['var'],
-              op: cm[2] as TierConditionInput['op'],
-              value: Number(cm[3]),
-            })
-          }
-        }
-      }
+      const conditions = parseBasicTierConditions(condStr) ?? []
       const tier: Record<string, unknown> = {
         conditions,
         input_unit_cost: Number(match[3]),
