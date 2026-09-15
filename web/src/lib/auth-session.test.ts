@@ -22,6 +22,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { useAuthStore, type AuthBundle } from '../stores/auth-store'
 import {
   applyAuthRotation,
+  assertAuthenticationResolved,
   bootstrapAuthentication,
   clearAuthenticatedClientState,
   createRefreshRunner,
@@ -169,9 +170,35 @@ describe('authentication session coordination', () => {
     expect(transientCount).toBe(1)
   })
 
-  test('an exhausted refresh race clears the unusable local session', async () => {
+  test('an origin guard rejection reports a configuration failure without signing out', async () => {
+    let transientCount = 0
+    let clearCount = 0
+    const runtime: AuthRefreshRuntime = {
+      request: async () => ({
+        status: 403,
+        data: { code: 'AUTH_ORIGIN_FORBIDDEN' },
+      }),
+      getExpectedSID: () => bundle.session.sid,
+      parseBundle: () => null,
+      acceptBundle: () => undefined,
+      clear: () => {
+        clearCount += 1
+      },
+      markTransient: () => {
+        transientCount += 1
+      },
+      wait: async () => undefined,
+    }
+
+    expect((await createRefreshRunner(runtime)()).kind).toBe('transient_error')
+    expect(clearCount).toBe(0)
+    expect(transientCount).toBe(1)
+  })
+
+  test('an exhausted refresh race remains retryable without clearing the session', async () => {
     const requestedDelays: number[] = []
     const clears: Array<[boolean, string | undefined]> = []
+    let transientCount = 0
     const runtime: AuthRefreshRuntime = {
       request: async () => ({
         status: 409,
@@ -183,18 +210,29 @@ describe('authentication session coordination', () => {
       clear: (synchronizeTabs, bootstrapState) => {
         clears.push([synchronizeTabs, bootstrapState])
       },
-      markTransient: () => undefined,
+      markTransient: () => {
+        transientCount += 1
+      },
       wait: async (delay) => {
         requestedDelays.push(delay)
       },
     }
 
-    expect(await createRefreshRunner(runtime)()).toEqual({
-      kind: 'out_of_sync',
-      code: 'AUTH_REFRESH_RACE',
-    })
+    expect((await createRefreshRunner(runtime)()).kind).toBe('transient_error')
     expect(requestedDelays).toEqual([80, 200, 500])
-    expect(clears).toEqual([[false, undefined]])
+    expect(clears).toEqual([])
+    expect(transientCount).toBe(1)
+  })
+
+  test('a temporary refresh failure cannot be mistaken for a signed-out session', () => {
+    const failure = new Error('refresh temporarily unavailable')
+
+    expect(() =>
+      assertAuthenticationResolved({ kind: 'transient_error', error: failure })
+    ).toThrow(failure)
+    expect(() =>
+      assertAuthenticationResolved({ kind: 'anonymous' })
+    ).not.toThrow()
   })
 
   test('an unexpected successful response is treated as out of sync', async () => {

@@ -87,6 +87,13 @@ class AuthRefreshSupersededError extends Error {
   }
 }
 
+class AuthRefreshRaceError extends Error {
+  constructor() {
+    super('Authentication refresh is still being coordinated')
+    this.name = 'AuthRefreshRaceError'
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object'
 }
@@ -237,8 +244,8 @@ export function createRefreshRunner(
         await runtime.wait(delay)
         return run(raceAttempt + 1, allowMismatchRetry)
       }
-      runtime.clear(false)
-      return { kind: 'out_of_sync', code }
+      runtime.markTransient()
+      return { kind: 'transient_error', error: new AuthRefreshRaceError() }
     }
 
     if (response.status === 409 && code === 'AUTH_SESSION_MISMATCH') {
@@ -248,6 +255,14 @@ export function createRefreshRunner(
       }
       runtime.clear(false)
       return { kind: 'out_of_sync', code }
+    }
+
+    if (response.status === 403 && code === 'AUTH_ORIGIN_FORBIDDEN') {
+      runtime.markTransient()
+      return {
+        kind: 'transient_error',
+        error: response.error ?? response.data,
+      }
     }
 
     if (response.status === 401) {
@@ -405,6 +420,17 @@ export async function bootstrapAuthentication(): Promise<RefreshOutcome> {
     }
   }
   return resolveAuthentication()
+}
+
+/**
+ * Stop route resolution when the server has not yet produced an authentication
+ * verdict. A transient refresh failure must never be rendered as a login form:
+ * doing so tells the user that a still-valid session has expired.
+ */
+export function assertAuthenticationResolved(outcome: RefreshOutcome): void {
+  if (outcome.kind !== 'transient_error') return
+  if (outcome.error instanceof Error) throw outcome.error
+  throw new Error(t('Request failed'), { cause: outcome.error })
 }
 
 export function getCommonHeaders(): Record<string, string> {
