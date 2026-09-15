@@ -170,7 +170,6 @@ export interface LogOtherData {
   login_method?: string
   user_agent?: string
   request_path?: string
-  billing_unit?: 'characters' | string
   billing_characters?: number
   request_conversion?: string[]
   ws?: boolean
@@ -205,7 +204,7 @@ export interface LogOtherData {
   // expression; the matched tier and request-rule traces come from the actual
   // settlement run.
   billing_mode?: string
-  billing_unit?: 'token' | 'request'
+  billing_unit?: 'characters' | 'token' | 'request'
   fixed_price?: number
   image_count?: number
   expr_b64?: string

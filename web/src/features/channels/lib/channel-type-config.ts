@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CHANNEL_TYPES } from '../constants'
+import {
+  CHANNEL_TYPES,
+  CHANNEL_TYPE_RINKO_AI,
+  CHANNEL_TYPE_VLLM,
+  CHANNEL_TYPE_SGLANG,
+} from '../constants'
 
 // ============================================================================
 // Channel Type Configuration
@@ -45,6 +50,26 @@ export interface ChannelTypeConfig {
  * Configuration for each channel type
  */
 export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
+  [CHANNEL_TYPE_SGLANG]: {
+    id: CHANNEL_TYPE_SGLANG,
+    name: CHANNEL_TYPES[CHANNEL_TYPE_SGLANG],
+    icon: 'SGLang',
+    hints: {
+      baseUrl: 'SGLang server address, without /v1',
+      key: 'SGLang API key, or EMPTY if authentication is disabled',
+      models: 'Models fetched from upstream /v1/models',
+    },
+  },
+  [CHANNEL_TYPE_VLLM]: {
+    id: CHANNEL_TYPE_VLLM,
+    name: CHANNEL_TYPES[CHANNEL_TYPE_VLLM],
+    icon: 'Vllm',
+    hints: {
+      baseUrl: 'vLLM server address, without /v1',
+      key: 'vLLM API key, or EMPTY if authentication is disabled',
+      models: 'Models fetched from upstream /v1/models',
+    },
+  },
   1: {
     id: 1,
     name: CHANNEL_TYPES[1],
@@ -156,11 +181,10 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models',
     },
   },
-  62: {
-    id: 62,
-    name: CHANNEL_TYPES[62],
+  [CHANNEL_TYPE_RINKO_AI]: {
+    id: CHANNEL_TYPE_RINKO_AI,
+    name: CHANNEL_TYPES[CHANNEL_TYPE_RINKO_AI],
     icon: 'NewAPI',
-    defaultBaseUrl: 'https://api.rinko.ai',
     hints: {
       baseUrl: 'Default: https://api.rinko.ai',
       key: 'Enter RinkoAI API key for this channel',

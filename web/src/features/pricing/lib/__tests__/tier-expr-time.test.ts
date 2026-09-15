@@ -33,6 +33,7 @@ const proExpression =
 
 const emptyExtras: ExtraTokenValues = {
   cacheReadTokens: 0,
+  imageCacheTokens: 0,
   cacheCreateTokens: 0,
   cacheCreate1hTokens: 0,
   imageTokens: 0,
@@ -80,7 +81,7 @@ describe('time-based tier expressions', () => {
       1,
       1,
       emptyExtras,
-      new Date('2026-08-29T02:00:00Z')
+      { now: new Date('2026-08-29T02:00:00Z') }
     )
 
     assert.equal(result.error, null)
@@ -94,7 +95,7 @@ describe('time-based tier expressions', () => {
       1,
       1,
       emptyExtras,
-      new Date('2026-08-29T05:00:00Z')
+      { now: new Date('2026-08-29T05:00:00Z') }
     )
 
     assert.equal(result.error, null)
