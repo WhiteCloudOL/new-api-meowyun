@@ -38,6 +38,7 @@ const CONFIG_KEYS = new Set([
   "allow_request_overrides",
   "max_audio_mb",
   "download_timeout_seconds",
+  "qwen_base_url",
 ]);
 
 const REQUEST_OVERRIDE_KEYS = new Set([
@@ -66,12 +67,12 @@ export const meta = {
     en: "OpenAI speech compatibility for Alibaba Cloud CosyVoice and Qwen TTS",
     zh: "为阿里云 CosyVoice 与千问 TTS 提供 OpenAI 语音兼容",
   },
-  version: "1.0.0",
+  version: "1.0.1",
   author: { name: "MeowYun" },
   baseUrl: "https://dashscope.aliyuncs.com",
   models: [...COSY_MODELS, ...QWEN_MODELS],
   fetchMode: "per_task",
-  allowedHosts: [],
+  allowedHosts: ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"],
   protocols: [{ name: "openai_audio_speech" }],
   configDefaults: {
     sample_rate: 24000,
@@ -83,6 +84,7 @@ export const meta = {
     allow_request_overrides: true,
     max_audio_mb: 32,
     download_timeout_seconds: 120,
+    qwen_base_url: "https://dashscope.aliyuncs.com",
   },
 };
 
@@ -127,6 +129,9 @@ export function validateConfig(config) {
   for (const name of ["enable_ssml", "enable_aigc_tag", "enable_markdown_filter", "optimize_instructions", "allow_request_overrides"])
     checkBoolean(config, name);
   for (const name of ["language_type", "aigc_propagator", "aigc_propagate_id"]) checkString(config, name);
+  checkString(config, "qwen_base_url", 191);
+  if (config.qwen_base_url !== undefined && !/^https:\/\/(?:dashscope|dashscope-intl)\.aliyuncs\.com(?:\/api\/v1)?\/?$/.test(config.qwen_base_url))
+    fail("qwen_base_url must be an official Alibaba Cloud Model Studio HTTP base URL");
   if (config.language_hints !== undefined) {
     if (
       !Array.isArray(config.language_hints) ||
@@ -237,8 +242,9 @@ function buildSpeech(ctx) {
     if (body.instructions) input.instructions = body.instructions;
     if (body.instructions && settings.optimize_instructions !== undefined) input.optimize_instructions = settings.optimize_instructions;
   }
+  const baseUrl = body.family === "qwen" ? settings.qwen_base_url : ctx.baseUrl;
   return {
-    url: normalizedBase(ctx.baseUrl) + path,
+    url: normalizedBase(baseUrl) + path,
     method: "POST",
     headers: { Authorization: ctx.authHeader, "Content-Type": "application/json" },
     body: { model: providerModel, input },

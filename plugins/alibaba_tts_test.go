@@ -16,9 +16,13 @@ func TestAlibabaTTSPluginContracts(t *testing.T) {
 	assert.Equal(t, "阿里云 TTS 兼容", plugin.Meta.Name)
 	assert.Contains(t, plugin.Meta.Models, "cosyvoice-v3.5-plus")
 	assert.Contains(t, plugin.Meta.Models, "qwen3-tts-instruct-flash")
+	assert.Contains(t, plugin.Meta.AllowedHosts, "dashscope.aliyuncs.com")
+	assert.Contains(t, plugin.Meta.AllowedHosts, "dashscope-intl.aliyuncs.com")
 
 	_, err = plugin.Engine.Call(t.Context(), "validateConfig", map[string]any{"sample_rate": 12345})
 	require.ErrorContains(t, err, "sample_rate is not supported")
+	_, err = plugin.Engine.Call(t.Context(), "validateConfig", map[string]any{"qwen_base_url": "https://example.com"})
+	require.ErrorContains(t, err, "official Alibaba Cloud Model Studio HTTP base URL")
 
 	decodedValue, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "decodeRequest"}, map[string]any{
 		"model": "cosyvoice-v3.5-plus",
@@ -60,6 +64,27 @@ func TestAlibabaTTSPluginContracts(t *testing.T) {
 	usage := parsed["usage"].(map[string]any)
 	assert.Equal(t, int64(2), usage["characters"])
 	assert.Equal(t, "req-1", parsed["requestId"])
+
+	qwenDecodedValue, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "decodeRequest"}, map[string]any{
+		"model": "qwen3-tts-flash",
+		"body": map[string]any{"kind": "json", "value": map[string]any{
+			"model": "qwen3-tts-flash", "input": "你好", "voice": "Cherry", "response_format": "wav",
+		}},
+	})
+	require.NoError(t, err)
+	qwenDecoded := qwenDecodedValue.(map[string]any)
+	qwenBuiltValue, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "buildRequest"}, map[string]any{
+		"requestBody":   qwenDecoded["requestBody"],
+		"model":         "qwen3-tts-flash",
+		"upstreamModel": "qwen3-tts-flash",
+		"baseUrl":       "https://workspace.cn-beijing.maas.aliyuncs.com",
+		"authHeader":    "Bearer secret",
+		"config":        plugin.Meta.ConfigDefaults,
+	})
+	require.NoError(t, err)
+	qwenBuilt := qwenBuiltValue.(map[string]any)
+	assert.Equal(t, "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", qwenBuilt["url"])
+	require.NoError(t, jsplugin.ValidateRequestURL(qwenBuilt["url"].(string), "https://workspace.cn-beijing.maas.aliyuncs.com", plugin.Meta.AllowedHosts))
 }
 
 func TestAlibabaTTSPluginRejectsUnsupportedRequestShapes(t *testing.T) {
