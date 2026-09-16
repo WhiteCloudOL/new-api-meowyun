@@ -542,6 +542,22 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		if !ok {
 			return fmt.Errorf("task plugin %q is not registered", pluginKey)
 		}
+		config := jsplugin.EffectiveConfig(plugin.Meta.ConfigDefaults, channel.GetSetting().TaskPluginConfig)
+		if len(config) == 0 && plugin.Meta.ConfigDefaults == nil {
+			config = nil
+		}
+		if config != nil {
+			hasValidator, err := plugin.Engine.HasCallablePath(context.Background(), "validateConfig")
+			if err != nil {
+				return fmt.Errorf("cannot inspect task plugin configuration validator: %w", err)
+			}
+			if !hasValidator {
+				return fmt.Errorf("task plugin %q does not accept channel configuration", pluginKey)
+			}
+			if _, err = plugin.Engine.Call(context.Background(), "validateConfig", config); err != nil {
+				return fmt.Errorf("task plugin configuration is invalid: %w", err)
+			}
+		}
 		if channel.BaseURL == nil || strings.TrimSpace(*channel.BaseURL) == "" {
 			// The plugin default is persisted onto the channel instead of being
 			// resolved per request, so the destination host stays an auditable

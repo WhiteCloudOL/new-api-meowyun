@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
+	jspluginadaptor "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -34,6 +36,11 @@ func AudioHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	}
 
 	adaptor := GetAdaptor(info.ApiType)
+	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
+		if pinned, valid := pinnedValue.(pluginruntime.PinnedEndpoint); valid && pinned.Plugin != nil && pinned.Protocol == "openai_audio_speech" {
+			adaptor = jspluginadaptor.NewAudio(pinned.Plugin)
+		}
+	}
 	if adaptor == nil {
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}

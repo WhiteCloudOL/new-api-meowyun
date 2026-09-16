@@ -74,19 +74,23 @@ type HostProtocolOperation struct {
 }
 
 type HostProtocolDefinition struct {
-	Name       string
-	Operations []HostProtocolOperation
+	Name           string
+	UsesTaskDriver bool
+	Operations     []HostProtocolOperation
 }
 
 var hostProtocols = []HostProtocolDefinition{
-	{Name: "openai_responses", Operations: []HostProtocolOperation{
+	{Name: "openai_responses", UsesTaskDriver: true, Operations: []HostProtocolOperation{
 		{Name: "create", Methods: []string{http.MethodPost}, Path: "/v1/responses", BodyKinds: []BodyKind{BodyJSON}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest"}, Modes: []ProtocolMode{{Name: "stream", Hook: "renderEvents"}, {Name: "sync", Hook: "renderFinal"}, {Name: "background", Hook: "renderFinal"}}},
 		{Name: "retrieve", Methods: []string{http.MethodGet}, Path: "/v1/responses/:response_id", BodyKinds: []BodyKind{BodyNone}},
 	}},
-	{Name: "openai_video", Operations: []HostProtocolOperation{
+	{Name: "openai_video", UsesTaskDriver: true, Operations: []HostProtocolOperation{
 		{Name: "create", Methods: []string{http.MethodPost}, Path: "/v1/videos", BodyKinds: []BodyKind{BodyJSON, BodyMultipart}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest"}},
 		{Name: "retrieve", Methods: []string{http.MethodGet}, Path: "/v1/videos/:task_id", BodyKinds: []BodyKind{BodyNone}, RequiredProtocolMembers: []string{"render"}},
 		{Name: "content", Methods: []string{http.MethodGet, http.MethodHead}, Path: "/v1/videos/:task_id/content", BodyKinds: []BodyKind{BodyNone}, RequiredDriverHooks: []string{"listArtifacts", "buildContentRequest"}},
+	}},
+	{Name: "openai_audio_speech", Operations: []HostProtocolOperation{
+		{Name: "create", Methods: []string{http.MethodPost}, Path: "/v1/audio/speech", BodyKinds: []BodyKind{BodyJSON}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest", "buildRequest", "parseResponse"}},
 	}},
 }
 

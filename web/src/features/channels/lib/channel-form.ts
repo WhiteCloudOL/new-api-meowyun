@@ -206,6 +206,10 @@ export const channelFormSchema = z
     type: z.number().min(0, ERROR_MESSAGES.REQUIRED_TYPE),
     base_url: z.string().optional(),
     task_plugin_key: z.string().optional(),
+    task_plugin_config: z
+      .string()
+      .optional()
+      .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
     key: z.string(),
     openai_organization: z.string().optional(),
     models: z.string().min(1, ERROR_MESSAGES.REQUIRED_MODELS),
@@ -428,6 +432,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   type: 1,
   base_url: '',
   task_plugin_key: '',
+  task_plugin_config: '{}',
   key: '',
   openai_organization: '',
   models: '',
@@ -494,6 +499,7 @@ export function transformChannelToFormDefaults(
   // Parse channel extra settings from setting field
   let extraSettings = {
     task_plugin_key: '',
+    task_plugin_config: '{}',
     force_format: false,
     thinking_to_content: false,
     proxy: '',
@@ -514,6 +520,11 @@ export function transformChannelToFormDefaults(
       )
       extraSettings = {
         task_plugin_key: parsed.task_plugin_key || '',
+        task_plugin_config: JSON.stringify(
+          parsed.task_plugin_config || {},
+          null,
+          2
+        ),
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
@@ -637,10 +648,18 @@ export function transformChannelToFormDefaults(
  * Build the setting JSON string from form extra settings
  */
 export function buildSettingJSON(formData: ChannelFormValues): string {
+  const taskPluginConfig = formData.task_plugin_config?.trim()
+    ? JSON.parse(formData.task_plugin_config)
+    : {}
   const settingObj: Record<string, unknown> = {
     task_plugin_key:
       formData.type === CHANNEL_TYPE_TASK_PLUGIN
         ? formData.task_plugin_key?.trim() || ''
+        : undefined,
+    task_plugin_config:
+      formData.type === CHANNEL_TYPE_TASK_PLUGIN &&
+      Object.keys(taskPluginConfig).length > 0
+        ? taskPluginConfig
         : undefined,
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,

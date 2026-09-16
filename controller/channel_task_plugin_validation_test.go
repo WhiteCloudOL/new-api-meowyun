@@ -67,3 +67,22 @@ export function parseTaskResult() { return {}; }
 	require.NoError(t, validateChannel(channel, false))
 	assert.Equal(t, explicit, *channel.BaseURL, "an administrator value is never replaced by the plugin default")
 }
+
+func TestValidateTaskPluginChannelConfiguration(t *testing.T) {
+	source := `
+export const meta = {apiVersion: 1, key: "channel-config", name: "Config", version: "1.0.0", author: {name: "Test"}, baseUrl: "https://example.com", models: ["speech"], fetchMode: "per_task", protocols: [{name: "openai_audio_speech"}], configDefaults: {volume: 50}};
+export function validateConfig(config) { if (!config || config.volume < 0 || config.volume > 100) throw new Error("volume out of range"); return true; }
+export const protocols = {openai_audio_speech: {decodeRequest(ctx) { return {kind: "relay", model: ctx.model}; }, buildRequest() { return {}; }, parseResponse() { return {}; }}};
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister("channel-config")) })
+
+	valid := `{"task_plugin_key":"channel-config","task_plugin_config":{"volume":80}}`
+	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, Key: "sk", Setting: &valid}
+	require.NoError(t, validateChannel(channel, true))
+
+	invalid := `{"task_plugin_key":"channel-config","task_plugin_config":{"volume":101}}`
+	channel.Setting = &invalid
+	require.ErrorContains(t, validateChannel(channel, true), "volume out of range")
+}

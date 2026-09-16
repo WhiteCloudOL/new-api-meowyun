@@ -522,7 +522,8 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			pinned.Protocol,
 			pinned.Model,
 		)
-		if !pluginruntime.SupportsHostProtocol(pinned.Protocol) {
+		definition, supportedProtocol := pluginruntime.HostProtocol(pinned.Protocol)
+		if !supportedProtocol {
 			logger.LogWarn(
 				c,
 				"task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=protocol_check reason=unsupported_protocol",
@@ -634,7 +635,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			} else if !resultOK {
 				reason = "result_not_object"
 				detail = taskPluginInvalidRouteResult
-			} else if kind, _ := result["kind"].(string); kind != string(pluginruntime.RouteTypeSubmit) {
+			} else if kind, _ := result["kind"].(string); kind != expectedProtocolIntentKind(definition) {
 				reason = "unsupported_kind"
 				detail = taskPluginInvalidRouteResult
 			} else if model, _ := result["model"].(string); strings.TrimSpace(model) == "" {
@@ -678,7 +679,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 		resolvedModel := pinned.Model
 
 		action := ""
-		if resolvedAction, present := resolved["action"]; present {
+		if resolvedAction, present := resolved["action"]; present && definition.UsesTaskDriver {
 			action, ok = resolvedAction.(string)
 			if !ok {
 				logger.LogWarn(
@@ -702,20 +703,22 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 		c.Set("task_plugin_key", pinned.Plugin.Meta.Key)
 		c.Set("platform", pinned.Plugin.Meta.Key)
 		service.AppendTaskPluginIdentityFilter(c, pinned.Plugin.Meta.Key)
-		c.Set("relay_mode", relayconstant.RelayModeVideoSubmit)
-		if strings.TrimSpace(action) != "" {
-			c.Set("task_action", action)
-		}
-		if intentErr := applyOriginTaskIntent(c, resolved, pinned.Plugin.Meta); intentErr != nil {
-			logger.LogWarn(
-				c,
-				"task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=origin_task reason=%s",
-				pinned.Generation.Number,
-				pinned.Plugin.Meta.Key,
-				intentErr.Code,
-			)
-			abortWithOpenAiMessage(c, intentErr.StatusCode, intentErr.Message, types.ErrorCode(intentErr.Code))
-			return
+		if definition.UsesTaskDriver {
+			c.Set("relay_mode", relayconstant.RelayModeVideoSubmit)
+			if strings.TrimSpace(action) != "" {
+				c.Set("task_action", action)
+			}
+			if intentErr := applyOriginTaskIntent(c, resolved, pinned.Plugin.Meta); intentErr != nil {
+				logger.LogWarn(
+					c,
+					"task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=origin_task reason=%s",
+					pinned.Generation.Number,
+					pinned.Plugin.Meta.Key,
+					intentErr.Code,
+				)
+				abortWithOpenAiMessage(c, intentErr.StatusCode, intentErr.Message, types.ErrorCode(intentErr.Code))
+				return
+			}
 		}
 		logger.LogDebug(
 			c,
@@ -732,6 +735,13 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 		)
 		c.Next()
 	}
+}
+
+func expectedProtocolIntentKind(definition pluginruntime.HostProtocolDefinition) string {
+	if definition.UsesTaskDriver {
+		return string(pluginruntime.RouteTypeSubmit)
+	}
+	return "relay"
 }
 
 func buildTaskPluginRouteRequest(c *gin.Context) (pluginruntime.RouteRequestContext, error) {

@@ -6534,5 +6534,7 @@
     "Zhipu GLM": "智谱GLM",
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放"
-  }
+  },
+  "Plugin configuration": "插件配置",
+  "Per-channel JSON settings validated by the selected plugin.": "由所选插件校验的渠道级 JSON 设置。"
 }

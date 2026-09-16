@@ -659,18 +659,19 @@ func GetTaskPluginOptions(c *gin.Context) {
 				_, _, hasIcon = plugins.Icon(meta.Key)
 			}
 			options = append(options, gin.H{
-				"key":           meta.Key,
-				"name":          meta.Name,
-				"description":   meta.Description,
-				"icon":          meta.Icon,
-				"hasIcon":       hasIcon,
-				"baseUrl":       meta.BaseURL,
-				"sortPriority":  meta.SortPriority,
-				"website":       meta.Website,
-				"models":        meta.Models,
-				"channelTypes":  meta.ChannelTypes,
-				"usageSchema":   meta.UsageSchema,
-				"usageProfiles": meta.UsageProfiles,
+				"key":            meta.Key,
+				"name":           meta.Name,
+				"description":    meta.Description,
+				"icon":           meta.Icon,
+				"hasIcon":        hasIcon,
+				"baseUrl":        meta.BaseURL,
+				"sortPriority":   meta.SortPriority,
+				"website":        meta.Website,
+				"models":         meta.Models,
+				"channelTypes":   meta.ChannelTypes,
+				"configDefaults": meta.ConfigDefaults,
+				"usageSchema":    meta.UsageSchema,
+				"usageProfiles":  meta.UsageProfiles,
 			})
 		}
 	}

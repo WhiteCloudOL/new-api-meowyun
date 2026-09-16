@@ -751,6 +751,11 @@ export function ChannelMutateDrawer({
         )
         form.setValue('type', CHANNEL_TYPE_TASK_PLUGIN, { shouldDirty: true })
         form.setValue('task_plugin_key', plugin.key, { shouldDirty: true })
+        form.setValue(
+          'task_plugin_config',
+          JSON.stringify(plugin.configDefaults || {}, null, 2),
+          { shouldDirty: true, shouldValidate: true }
+        )
         if (!isEditing && !providerTarget && !form.getValues('name').trim()) {
           form.setValue('name', plugin.name)
         }
@@ -3715,6 +3720,35 @@ export function ChannelMutateDrawer({
                         </AlertDescription>
                       </Alert>
                     )}
+                  </FormItem>
+                )}
+              />
+            )}
+
+            {currentType === CHANNEL_TYPE_TASK_PLUGIN && boundTaskPlugin && (
+              <FormField
+                control={form.control}
+                name='task_plugin_config'
+                render={({ field }) => (
+                  <FormItem className='space-y-3'>
+                    <div className='space-y-1'>
+                      <FormLabel>{t('Plugin configuration')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Per-channel JSON settings validated by the selected plugin.'
+                        )}
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <JsonEditor
+                        value={field.value || '{}'}
+                        onChange={field.onChange}
+                        disabled={sensitiveLocked || isSubmitting}
+                        template={boundTaskPlugin.configDefaults || undefined}
+                        valueType='any'
+                      />
+                    </FormControl>
+                    <FormMessage />
                   </FormItem>
                 )}
               />

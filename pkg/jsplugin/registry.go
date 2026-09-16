@@ -102,6 +102,7 @@ type Meta struct {
 	AllowedHosts         []string                    `json:"allowedHosts"`
 	Routes               []Route                     `json:"routes"`
 	Protocols            []ProtocolClaim             `json:"protocols"`
+	ConfigDefaults       map[string]any              `json:"configDefaults,omitempty"`
 	UsageSchema          map[string]UsageFieldSchema `json:"usageSchema,omitempty"`
 	UsageExamples        []UsageExample              `json:"usageExamples,omitempty"`
 	UsageProfiles        []UsageProfile              `json:"usageProfiles,omitempty"`
@@ -294,17 +295,25 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 	}
 	engine.key = meta.Key
 	engine.version = meta.Version
-	requiredHooks := []string{"buildSubmitRequest", "parseSubmitResponse", "parseTaskResult"}
-	if slices.Contains(meta.SubmitResponseTypes, "sse") {
+	usesTaskDriver := len(meta.Protocols) == 0 || len(meta.Routes) > 0
+	for _, claim := range meta.Protocols {
+		definition, _ := HostProtocol(claim.Name)
+		usesTaskDriver = usesTaskDriver || definition.UsesTaskDriver
+	}
+	requiredHooks := make([]string, 0, 7)
+	if usesTaskDriver {
+		requiredHooks = append(requiredHooks, "buildSubmitRequest", "parseSubmitResponse", "parseTaskResult")
+	}
+	if usesTaskDriver && slices.Contains(meta.SubmitResponseTypes, "sse") {
 		if slices.Contains(meta.RequiredCapabilities, CapabilitySubmitSSEDelta) {
 			requiredHooks = append(requiredHooks, "parseSubmitEventDelta")
 		} else {
 			requiredHooks = append(requiredHooks, "parseSubmitEvent")
 		}
 	}
-	if meta.FetchMode == "batch" {
+	if usesTaskDriver && meta.FetchMode == "batch" {
 		requiredHooks = append(requiredHooks, "buildBatchQueryRequest", "parseBatchResult")
-	} else {
+	} else if usesTaskDriver {
 		requiredHooks = append(requiredHooks, "buildQueryRequest")
 	}
 	for _, hook := range requiredHooks {
@@ -336,6 +345,18 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 	}
 	if artifactHooks["listArtifacts"] != artifactHooks["buildContentRequest"] {
 		return nil, fmt.Errorf("plugin %s must export listArtifacts and buildContentRequest together", meta.Key)
+	}
+	if meta.ConfigDefaults != nil {
+		has, hasErr := engine.HasCallablePath(context.Background(), "validateConfig")
+		if hasErr != nil {
+			return nil, hasErr
+		}
+		if !has {
+			return nil, fmt.Errorf("plugin %s declares configDefaults but is missing required export %q", meta.Key, "validateConfig")
+		}
+		if _, callErr := engine.Call(context.Background(), "validateConfig", clonePluginRequestValue(meta.ConfigDefaults)); callErr != nil {
+			return nil, fmt.Errorf("plugin %s configDefaults failed validation: %w", meta.Key, callErr)
+		}
 	}
 	for _, route := range meta.Routes {
 		for kind, member := range map[string]string{"decode": route.Decode, "render": route.Render} {
@@ -834,6 +855,9 @@ func cloneMeta(meta Meta) Meta {
 	meta.ChannelTypes = append([]int(nil), meta.ChannelTypes...)
 	meta.Models = append([]string(nil), meta.Models...)
 	meta.AllowedHosts = append([]string(nil), meta.AllowedHosts...)
+	if meta.ConfigDefaults != nil {
+		meta.ConfigDefaults = clonePluginRequestValue(meta.ConfigDefaults).(map[string]any)
+	}
 	meta.Routes = append([]Route(nil), meta.Routes...)
 	for index := range meta.Routes {
 		meta.Routes[index].Models = append([]string(nil), meta.Routes[index].Models...)
@@ -856,6 +880,22 @@ func cloneMeta(meta Meta) Meta {
 		profile.Examples = CloneUsageExamples(profile.Examples)
 	}
 	return meta
+}
+
+// EffectiveConfig overlays channel-specific values on the manifest defaults
+// and returns an isolated JSON object for hook calls.
+func EffectiveConfig(defaults, override map[string]any) map[string]any {
+	if defaults == nil && override == nil {
+		return nil
+	}
+	config := make(map[string]any, len(defaults)+len(override))
+	if defaults != nil {
+		maps.Copy(config, clonePluginRequestValue(defaults).(map[string]any))
+	}
+	if override != nil {
+		maps.Copy(config, clonePluginRequestValue(override).(map[string]any))
+	}
+	return config
 }
 
 // CloneUsageSchema copies schema fields and localized metadata for independent readers.
@@ -975,7 +1015,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "routes", "protocols", "configDefaults", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1081,6 +1121,20 @@ func decodeMeta(value any) (Meta, error) {
 	meta.Protocols, err = decodeProtocolClaims(object, "protocols")
 	if err != nil {
 		return Meta{}, err
+	}
+	if rawConfig, exists := object["configDefaults"]; exists {
+		config, configOK := rawConfig.(map[string]any)
+		if !configOK {
+			return Meta{}, fmt.Errorf("plugin meta configDefaults must be an object")
+		}
+		encoded, encodeErr := common.Marshal(config)
+		if encodeErr != nil {
+			return Meta{}, fmt.Errorf("plugin meta configDefaults must contain JSON values: %w", encodeErr)
+		}
+		if len(encoded) > 64<<10 {
+			return Meta{}, fmt.Errorf("plugin meta configDefaults must not exceed 64 KiB")
+		}
+		meta.ConfigDefaults = clonePluginRequestValue(config).(map[string]any)
 	}
 	if usageSchema, exists := object["usageSchema"]; exists {
 		meta.UsageSchema, err = decodeUsageSchema(usageSchema)

@@ -59,6 +59,24 @@ func newProtectedFetchHTTPClient() *http.Client {
 	return newProtectedFetchHTTPClientWithDialer(nil, nil, nil)
 }
 
+// NewStrictSSRFProtectedHTTPClient returns a direct client that always blocks
+// private/reserved targets and non-HTTP(S) ports, independent of the optional
+// administrator fetch policy. It is intended for URLs returned by providers.
+func NewStrictSSRFProtectedHTTPClient(timeout time.Duration) *http.Client {
+	protection, err := common.NewSSRFProtectionFromFetchSetting(false, false, false, nil, nil, []string{"80", "443"}, true)
+	if err != nil {
+		panic(err)
+	}
+	client := newProtectedFetchHTTPClientWithProxy(
+		nil,
+		nil,
+		func() (*common.SSRFProtection, bool, error) { return protection, true, nil },
+		func(*http.Request) (*url.URL, error) { return nil, nil },
+	)
+	client.Timeout = timeout
+	return client
+}
+
 func newProtectedFetchHTTPClientWithDialer(resolver ssrfResolver, dialContext func(ctx context.Context, network, address string) (net.Conn, error), getProtection func() (*common.SSRFProtection, bool, error)) *http.Client {
 	return newProtectedFetchHTTPClientWithProxy(resolver, dialContext, getProtection, http.ProxyFromEnvironment)
 }

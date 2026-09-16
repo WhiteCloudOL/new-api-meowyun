@@ -6534,5 +6534,7 @@
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V 4",
     "Zoom": "ズーム"
-  }
+  },
+  "Plugin configuration": "プラグイン設定",
+  "Per-channel JSON settings validated by the selected plugin.": "選択したプラグインによって検証されるチャネル単位の JSON 設定です。"
 }

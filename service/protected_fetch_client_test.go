@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -211,6 +212,20 @@ func TestGetSSRFProtectedHTTPClientFallsBackToDefaultClientWhenProtectionDisable
 	ssrfProtectedHTTPClient = &http.Client{}
 
 	require.Same(t, expected, GetSSRFProtectedHTTPClient())
+}
+
+func TestStrictSSRFProtectedHTTPClientIgnoresDisabledGlobalProtection(t *testing.T) {
+	fetchSetting := system_setting.GetFetchSetting()
+	original := *fetchSetting
+	t.Cleanup(func() { *fetchSetting = original })
+	fetchSetting.EnableSSRFProtection = false
+
+	client := NewStrictSSRFProtectedHTTPClient(time.Second)
+	request, err := http.NewRequest(http.MethodGet, "http://127.0.0.1/private", nil)
+	require.NoError(t, err)
+	response, err := client.Do(request)
+	require.ErrorContains(t, err, "private IP address not allowed")
+	require.Nil(t, response)
 }
 
 func TestProtectedFetchRoundTripperUsesConfiguredProxy(t *testing.T) {

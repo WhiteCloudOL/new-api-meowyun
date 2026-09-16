@@ -79,6 +79,7 @@ const soraPlugin: TaskPluginOption = {
   icon: 'text',
   baseUrl: 'https://video.example',
   models: ['sora-2'],
+  configDefaults: { quality: 'standard', retries: 2 },
 }
 
 function deferredResponse<T>() {
@@ -627,6 +628,7 @@ test('creating a migrated provider uses its plugin binding instead of the legacy
   const payload = post.mock.calls[0]?.[1] as { channel: { setting: string } }
   expect(JSON.parse(payload.channel.setting)).toMatchObject({
     task_plugin_key: 'sora',
+    task_plugin_config: { quality: 'standard', retries: 2 },
   })
 })
 

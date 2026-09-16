@@ -1841,3 +1841,78 @@ func TestAlibabaSubmitDeltaDoesNotMutateControlState(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"choices":[{"count":2,"lastText":false,"finishReason":"stop"}],"hasUsage":true}`, string(encoded))
 }
+
+func TestNormalizePluginAudioUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		characters float64
+		input      float64
+		output     float64
+		total      float64
+		valid      bool
+	}{
+		{name: "characters", characters: 12, valid: true},
+		{name: "tokens", input: 7, output: 13, total: 20, valid: true},
+		{name: "mixed units", characters: 12, input: 7, valid: false},
+		{name: "fractional", characters: 1.5, valid: false},
+		{name: "missing", valid: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := audioResponseDescriptor{}
+			parsed.Usage.Characters = tc.characters
+			parsed.Usage.InputTextTokens = tc.input
+			parsed.Usage.OutputAudioTokens = tc.output
+			parsed.Usage.TotalTokens = tc.total
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			usage, err := normalizePluginAudioUsage(ctx, &relaycommon.RelayInfo{}, parsed)
+			if !tc.valid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tc.characters > 0 {
+				assert.Equal(t, "characters", ctx.GetString("billing_unit"))
+				assert.Equal(t, int(tc.characters), usage.PromptTokens)
+				return
+			}
+			assert.Equal(t, int(tc.input), usage.PromptTokensDetails.TextTokens)
+			assert.Equal(t, int(tc.output), usage.CompletionTokenDetails.AudioTokens)
+			assert.Equal(t, int(tc.total), usage.TotalTokens)
+		})
+	}
+}
+
+func TestAlibabaAudioAdaptorWritesBase64Response(t *testing.T) {
+	source, err := plugins.Source("alibaba-tts")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.CompilePlugin(source, pluginruntime.Options{})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	adaptor := NewAudio(plugin)
+	adaptor.format = "mp3"
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body: io.NopCloser(strings.NewReader(`{
+			"request_id":"req-native-tts",
+			"output":{"audio":{"data":"YXVkaW8=","url":""}},
+			"usage":{"characters":5}
+		}`)),
+	}
+
+	result, responseErr := adaptor.DoResponse(ctx, response, info)
+
+	require.Nil(t, responseErr)
+	usage := result.(*dto.Usage)
+	assert.Equal(t, 5, usage.PromptTokens)
+	assert.Equal(t, 5, usage.PromptTokensDetails.TextTokens)
+	assert.Equal(t, "characters", ctx.GetString("billing_unit"))
+	assert.Equal(t, "audio/mpeg", recorder.Header().Get("Content-Type"))
+	assert.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+	assert.Equal(t, "req-native-tts", recorder.Header().Get("X-Request-Id"))
+	assert.Equal(t, "audio", recorder.Body.String())
+}

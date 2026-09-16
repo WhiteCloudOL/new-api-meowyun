@@ -24,17 +24,18 @@ export type DecodedBody =
   | Readonly<{kind: "none"}>;
 
 export interface NativeDecodeContext {method: string; path: string; params: Readonly<Record<string, string>>; query: Readonly<Record<string, readonly string[]>>; body: DecodedBody}
-export interface ProtocolDecodeContext extends NativeDecodeContext {protocol: "openai_responses" | "openai_video"; operation: string; model: string; stream: boolean}
+export interface ProtocolDecodeContext extends NativeDecodeContext {protocol: ProtocolName; operation: string; model: string; upstreamModel?: string; stream: boolean}
 export type SubmitIntent = {kind: "submit"; model: string; action?: string; requestBody?: unknown; originTaskIds?: readonly string[]};
+export type RelayIntent = {kind: "relay"; model: string; requestBody?: unknown};
 export type QueryIntent = {kind: "query"; taskIds: readonly string[]};
 export type TaskIntent = SubmitIntent | QueryIntent;
 export interface NativeRoute {method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string; type: "submit" | "query" | "dynamic"; action?: string; taskIdParam?: string; decode?: string; render: string; models?: readonly string[]}
-export type ProtocolName = "openai_responses" | "openai_video";
+export type ProtocolName = "openai_responses" | "openai_video" | "openai_audio_speech";
 export type ResponsesMode = "stream" | "sync" | "background";
 export type ProtocolClaim =
-  | "openai_video"
+  | "openai_video" | "openai_audio_speech"
   | {name: "openai_responses"; supports: readonly ResponsesMode[]; models?: readonly string[]}
-  | {name: "openai_video"; models?: readonly string[]};
+  | {name: "openai_video" | "openai_audio_speech"; models?: readonly string[]};
 export type LocalizedText = string | ({ en: string } & Record<string, string>);
 export type UsageFieldSchema =
   | {type: "number"; unit: "count"; unitLabel?: LocalizedText; description?: LocalizedText}
@@ -43,7 +44,7 @@ export type UsageFieldSchema =
   | {enum: readonly string[]; unitLabel?: never; description?: LocalizedText; enumLabels?: Readonly<Record<string, LocalizedText>>};
 export type UsageExample = {label: string; facts: Readonly<Record<string, string | number | boolean>>};
 export type UsageProfile = {models: readonly string[]; schema: Readonly<Record<string, UsageFieldSchema>>; examples?: readonly UsageExample[]};
-export interface Meta {requiredCapabilities?: readonly HostCapability[]; submitResponseTypes?: readonly ("json" | "sse")[]; sortPriority?: number; website?: string; apiVersion: 1; key: string; name: string; icon?: string; description?: LocalizedText; version: string; author: {name: string; url?: string}; baseUrl?: string; channelTypes?: readonly number[]; models: readonly string[]; fetchMode: "per_task" | "batch"; allowedHosts?: readonly string[]; routes?: readonly NativeRoute[]; protocols?: readonly ProtocolClaim[]; usageSchema?: Readonly<Record<string, UsageFieldSchema>>; usageExamples?: readonly UsageExample[]; usageProfiles?: readonly UsageProfile[]; auth?: "none" | "api_key" | "vertex_oauth" | {type: "none" | "api_key" | "oauth2_jwt"}}
+export interface Meta {requiredCapabilities?: readonly HostCapability[]; submitResponseTypes?: readonly ("json" | "sse")[]; sortPriority?: number; website?: string; apiVersion: 1; key: string; name: string; icon?: string; description?: LocalizedText; version: string; author: {name: string; url?: string}; baseUrl?: string; channelTypes?: readonly number[]; models: readonly string[]; fetchMode: "per_task" | "batch"; allowedHosts?: readonly string[]; routes?: readonly NativeRoute[]; protocols?: readonly ProtocolClaim[]; configDefaults?: Readonly<Record<string, JSONValue>>; usageSchema?: Readonly<Record<string, UsageFieldSchema>>; usageExamples?: readonly UsageExample[]; usageProfiles?: readonly UsageProfile[]; auth?: "none" | "api_key" | "vertex_oauth" | {type: "none" | "api_key" | "oauth2_jwt"}}
 export interface TaskView {task_id: string; status: string; progress?: string; fail_reason?: string; created_at?: number; updated_at?: number; data?: unknown; properties?: Record<string, unknown>}
 export interface DriverContext {requestBody: unknown; requestHeaders: Readonly<Record<string, string>>; action: string; model: string; upstreamModel: string; baseUrl: string; apiKey?: string; authHeader: string; files: readonly FileReference[]; publicTaskId: string; originTasks?: readonly {taskId: string; upstreamTaskId: string; action: string; status: string; data: unknown}[]}
 export interface TaskQueryContext {taskId: string; publicTaskId: string; action: string; model: string; upstreamModel: string; baseUrl: string; apiKey?: string; authHeader: string; auth?: unknown; data: unknown; state: unknown}
@@ -58,7 +59,12 @@ export declare const native: Record<string, ((ctx: NativeDecodeContext) => TaskI
 export declare const protocols: {
   openai_responses?: {decodeRequest(ctx: ProtocolDecodeContext): SubmitIntent; renderEvents?(ctx: unknown, task: TaskView, previousState: unknown): unknown; renderFinal?(ctx: unknown, task: TaskView): unknown};
   openai_video?: {decodeRequest(ctx: ProtocolDecodeContext): SubmitIntent; render(ctx: unknown, task: TaskView): unknown};
+  openai_audio_speech?: {decodeRequest(ctx: ProtocolDecodeContext): RelayIntent; buildRequest(ctx: AudioDriverContext): RequestDescriptor; parseResponse(ctx: AudioResponseContext): AudioResponseDescriptor};
 };
+export interface AudioDriverContext {requestBody: unknown; model: string; upstreamModel: string; baseUrl: string; apiKey?: string; authHeader: string; config: Readonly<Record<string, JSONValue>>}
+export interface AudioResponseContext {statusCode: number; headers: Readonly<Record<string, readonly string[]>>; body: unknown; config: Readonly<Record<string, JSONValue>>}
+export interface AudioResponseDescriptor {audio: {data?: string; url?: string}; format?: "mp3" | "wav" | "pcm" | "opus"; requestId?: string; allowedHostSuffixes?: readonly string[]; maxBytes?: number; timeoutSeconds?: number; usage: {characters?: number; inputTextTokens?: number; outputAudioTokens?: number; totalTokens?: number}}
+export declare function validateConfig(config: Readonly<Record<string, JSONValue>>): unknown;
 export declare function buildSubmitRequest(ctx: DriverContext): RequestDescriptor;
 export interface SubmitEvent {event: string; id: string; data: string}
 export type JSONPath = readonly (string | number)[];
