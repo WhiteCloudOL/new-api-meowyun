@@ -28,6 +28,13 @@ func TestMigrateRinkoAIChannelTypePreservesExistingAndFutureChannels(t *testing.
 		Models: "nai-diffusion-5-full",
 		Group:  "default",
 	}
+	currentRinkoAI := Channel{
+		Type:   62, // Existing fork databases already persist RinkoAI as type 62.
+		Key:    "current-rinko-key",
+		Name:   "current-rinko",
+		Models: "nai-diffusion-5-curated",
+		Group:  "default",
+	}
 	openAI := Channel{
 		Type:   constant.ChannelTypeOpenAI,
 		Key:    "openai-key",
@@ -36,6 +43,7 @@ func TestMigrateRinkoAIChannelTypePreservesExistingAndFutureChannels(t *testing.
 		Group:  "default",
 	}
 	require.NoError(t, database.Create(&legacyRinkoAI).Error)
+	require.NoError(t, database.Create(&currentRinkoAI).Error)
 	require.NoError(t, database.Create(&openAI).Error)
 
 	require.NoError(t, migrateRinkoAIChannelType())
@@ -43,6 +51,13 @@ func TestMigrateRinkoAIChannelTypePreservesExistingAndFutureChannels(t *testing.
 	var migrated Channel
 	require.NoError(t, database.First(&migrated, legacyRinkoAI.Id).Error)
 	assert.Equal(t, constant.ChannelTypeRinkoAI, migrated.Type)
+
+	var preservedRinkoAI Channel
+	require.NoError(t, database.First(&preservedRinkoAI, currentRinkoAI.Id).Error)
+	assert.Equal(t, 62, preservedRinkoAI.Type)
+	assert.Equal(t, "RinkoAI", constant.GetChannelTypeName(preservedRinkoAI.Type))
+	assert.Equal(t, currentRinkoAI.Key, preservedRinkoAI.Key)
+	assert.Equal(t, currentRinkoAI.Models, preservedRinkoAI.Models)
 
 	var untouched Channel
 	require.NoError(t, database.First(&untouched, openAI.Id).Error)

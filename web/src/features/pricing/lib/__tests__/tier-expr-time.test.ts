@@ -76,13 +76,9 @@ describe('time-based tier expressions', () => {
   })
 
   test('evaluates the peak tier with the configured timezone', () => {
-    const result = evalExprLocally(
-      proExpression,
-      1,
-      1,
-      emptyExtras,
-      { now: new Date('2026-08-29T02:00:00Z') }
-    )
+    const result = evalExprLocally(proExpression, 1, 1, emptyExtras, {
+      now: new Date('2026-08-29T02:00:00Z'),
+    })
 
     assert.equal(result.error, null)
     assert.equal(result.matchedTier, 'peak')
@@ -90,13 +86,9 @@ describe('time-based tier expressions', () => {
   })
 
   test('evaluates the fallback tier outside peak windows', () => {
-    const result = evalExprLocally(
-      proExpression,
-      1,
-      1,
-      emptyExtras,
-      { now: new Date('2026-08-29T05:00:00Z') }
-    )
+    const result = evalExprLocally(proExpression, 1, 1, emptyExtras, {
+      now: new Date('2026-08-29T05:00:00Z'),
+    })
 
     assert.equal(result.error, null)
     assert.equal(result.matchedTier, 'offpeak')
