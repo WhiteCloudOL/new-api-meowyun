@@ -340,7 +340,10 @@ func InjectTieredBillingInfo(other *model.LogOther, relayInfo *relaycommon.Relay
 		}
 		other.SetPublic("matched_tier", result.MatchedTier)
 		if result.BillingUnit != "" {
-			other.SetPublic("billing_unit", result.BillingUnit)
+			existingBillingUnit, _ := other.Snapshot()["billing_unit"].(string)
+			if existingBillingUnit != "characters" || result.BillingUnit != billingexpr.BillingUnitToken {
+				other.SetPublic("billing_unit", result.BillingUnit)
+			}
 		}
 		if result.FixedPrice != nil {
 			other.SetPublic("fixed_price", *result.FixedPrice)
@@ -353,7 +356,10 @@ func InjectTieredBillingInfo(other *model.LogOther, relayInfo *relaycommon.Relay
 			other.SetPublic("image_count", *snap.EstimatedImageCount)
 		}
 		other.SetPublic("matched_tier", snap.EstimatedTier)
-		other.SetPublic("billing_unit", snap.EstimatedBillingUnit)
+		existingBillingUnit, _ := other.Snapshot()["billing_unit"].(string)
+		if existingBillingUnit != "characters" || snap.EstimatedBillingUnit != billingexpr.BillingUnitToken {
+			other.SetPublic("billing_unit", snap.EstimatedBillingUnit)
+		}
 		if snap.EstimatedFixedPrice != nil {
 			other.SetPublic("fixed_price", *snap.EstimatedFixedPrice)
 		}
