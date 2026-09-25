@@ -100,6 +100,7 @@ type Meta struct {
 	Models               []string                    `json:"models"`
 	FetchMode            string                      `json:"fetchMode"`
 	AllowedHosts         []string                    `json:"allowedHosts"`
+	Upstreams            []string                    `json:"upstreams,omitempty"`
 	Routes               []Route                     `json:"routes"`
 	Protocols            []ProtocolClaim             `json:"protocols"`
 	ConfigDefaults       map[string]any              `json:"configDefaults,omitempty"`
@@ -107,6 +108,21 @@ type Meta struct {
 	UsageExamples        []UsageExample              `json:"usageExamples,omitempty"`
 	UsageProfiles        []UsageProfile              `json:"usageProfiles,omitempty"`
 	Auth                 AuthMeta                    `json:"auth"`
+}
+
+// Upstream kinds a plugin driver can address. Every driver speaks to its
+// vendor; a driver that also builds its own native-route URLs when the channel
+// points at another New API gateway declares UpstreamKindNewAPI in
+// meta.upstreams, which is what makes it bindable to a type-60 channel.
+const (
+	UpstreamKindVendor = "vendor"
+	UpstreamKindNewAPI = "new_api"
+)
+
+// SupportsUpstream reports whether the driver handles channels of the given
+// upstream kind. The vendor kind is implied for every plugin.
+func (m Meta) SupportsUpstream(kind string) bool {
+	return kind == UpstreamKindVendor || slices.Contains(m.Upstreams, kind)
 }
 
 // UsageProfile replaces the plugin's default usage metadata for its models.
@@ -120,11 +136,22 @@ type UsageProfile struct {
 // must be resolved by the host first; an unknown or ambiguous model uses the
 // plugin defaults. Profile examples never inherit the default examples.
 func (m Meta) UsageForModel(model string) (map[string]UsageFieldSchema, []UsageExample) {
-	folded := asciiFold(model)
-	for _, profile := range m.UsageProfiles {
-		for _, declared := range profile.Models {
-			if asciiFold(declared) == folded {
-				return profile.Schema, profile.Examples
+	return m.UsageForModels(model)
+}
+
+// UsageForModels returns the usage metadata of the first candidate that a
+// profile declares. Runtime callers pass the final upstream model before the
+// client-facing model, so a channel mapping that sends a declared model to a
+// vendor endpoint ID keeps the declared model's profile. When no candidate is
+// profiled, the plugin defaults apply.
+func (m Meta) UsageForModels(models ...string) (map[string]UsageFieldSchema, []UsageExample) {
+	for _, model := range models {
+		folded := asciiFold(model)
+		for _, profile := range m.UsageProfiles {
+			for _, declared := range profile.Models {
+				if asciiFold(declared) == folded {
+					return profile.Schema, profile.Examples
+				}
 			}
 		}
 	}
@@ -858,6 +885,7 @@ func cloneMeta(meta Meta) Meta {
 	if meta.ConfigDefaults != nil {
 		meta.ConfigDefaults = clonePluginRequestValue(meta.ConfigDefaults).(map[string]any)
 	}
+	meta.Upstreams = slices.Clone(meta.Upstreams)
 	meta.Routes = append([]Route(nil), meta.Routes...)
 	for index := range meta.Routes {
 		meta.Routes[index].Models = append([]string(nil), meta.Routes[index].Models...)
@@ -1015,7 +1043,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "routes", "protocols", "configDefaults", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "configDefaults", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1108,6 +1136,10 @@ func decodeMeta(value any) (Meta, error) {
 		return Meta{}, err
 	}
 	meta.AllowedHosts, err = strictStringSlice(object, "allowedHosts")
+	if err != nil {
+		return Meta{}, err
+	}
+	meta.Upstreams, err = strictStringSlice(object, "upstreams")
 	if err != nil {
 		return Meta{}, err
 	}
@@ -1213,6 +1245,13 @@ func normalizeV1Meta(meta *Meta) error {
 		}
 		seenCapabilities[name] = true
 	}
+	seenUpstreams := make(map[string]bool, len(meta.Upstreams))
+	for _, kind := range meta.Upstreams {
+		if (kind != UpstreamKindVendor && kind != UpstreamKindNewAPI) || seenUpstreams[kind] {
+			return fmt.Errorf("unsupported or duplicate upstream kind %q", kind)
+		}
+		seenUpstreams[kind] = true
+	}
 	if meta.SortPriority < math.MinInt32 || meta.SortPriority > math.MaxInt32 {
 		return fmt.Errorf("plugin meta sortPriority must be a signed 32-bit integer")
 	}
@@ -1309,6 +1348,9 @@ func normalizeV1Meta(meta *Meta) error {
 		}
 		if channelType == constant.ChannelTypeTaskPlugin {
 			return fmt.Errorf("plugin meta channelTypes must not contain the task plugin channel type")
+		}
+		if channelType == constant.ChannelTypeNewAPI {
+			return fmt.Errorf("plugin meta channelTypes must not contain the New API channel type; bind the plugin through task_extend_plugin_keys instead")
 		}
 		if _, duplicate := seenChannelTypes[channelType]; duplicate {
 			return fmt.Errorf("plugin meta channelTypes must be unique")
@@ -1778,7 +1820,7 @@ func decodeRoutes(value any) ([]Route, error) {
 		}
 		for key := range object {
 			switch key {
-			case "method", "path", "type", "action", "decode", "render", "taskIdParam", "models":
+			case "method", "path", "type", "action", "decode", "render", "taskIdParam", "models", "retainResult":
 			default:
 				return nil, fmt.Errorf("plugin meta route %d has unknown field %q", index, key)
 			}
@@ -1815,6 +1857,13 @@ func decodeRoutes(value any) ([]Route, error) {
 			if len(route.Models) == 0 {
 				return nil, fmt.Errorf("plugin meta route %d models must contain at least one model", index)
 			}
+		}
+		if value, exists := object["retainResult"]; exists {
+			retain, ok := value.(bool)
+			if !ok {
+				return nil, fmt.Errorf("plugin meta route %d retainResult must be a boolean", index)
+			}
+			route.RetainResult = &retain
 		}
 		routes = append(routes, route)
 	}
