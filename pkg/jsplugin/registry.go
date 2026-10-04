@@ -354,11 +354,7 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 	}
 	artifactHooks := make(map[string]bool, 2)
 	for _, hook := range []string{"listArtifacts", "buildContentRequest"} {
-		exported, exportErr := engine.HasExport(context.Background(), hook)
-		if exportErr != nil {
-			return nil, exportErr
-		}
-		if !exported {
+		if !engine.HasExport(hook) {
 			continue
 		}
 		callable, callableErr := engine.HasCallablePath(context.Background(), hook)
@@ -381,7 +377,7 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 		if !has {
 			return nil, fmt.Errorf("plugin %s declares configDefaults but is missing required export %q", meta.Key, "validateConfig")
 		}
-		if _, callErr := engine.Call(context.Background(), "validateConfig", clonePluginRequestValue(meta.ConfigDefaults)); callErr != nil {
+		if _, callErr := engine.Call(context.Background(), "validateConfig", clonePluginConfigValue(meta.ConfigDefaults)); callErr != nil {
 			return nil, fmt.Errorf("plugin %s configDefaults failed validation: %w", meta.Key, callErr)
 		}
 	}
@@ -518,11 +514,7 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 		}
 	}
 	for _, removed := range []string{"resolveRequest", "renderError", "renderers"} {
-		has, e := engine.HasExport(context.Background(), removed)
-		if e != nil {
-			return nil, e
-		}
-		if has {
+		if engine.HasExport(removed) {
 			return nil, fmt.Errorf("plugin %s export %q is no longer supported", meta.Key, removed)
 		}
 	}
@@ -883,7 +875,7 @@ func cloneMeta(meta Meta) Meta {
 	meta.Models = append([]string(nil), meta.Models...)
 	meta.AllowedHosts = append([]string(nil), meta.AllowedHosts...)
 	if meta.ConfigDefaults != nil {
-		meta.ConfigDefaults = clonePluginRequestValue(meta.ConfigDefaults).(map[string]any)
+		meta.ConfigDefaults = clonePluginConfigValue(meta.ConfigDefaults).(map[string]any)
 	}
 	meta.Upstreams = slices.Clone(meta.Upstreams)
 	meta.Routes = append([]Route(nil), meta.Routes...)
@@ -918,12 +910,41 @@ func EffectiveConfig(defaults, override map[string]any) map[string]any {
 	}
 	config := make(map[string]any, len(defaults)+len(override))
 	if defaults != nil {
-		maps.Copy(config, clonePluginRequestValue(defaults).(map[string]any))
+		maps.Copy(config, clonePluginConfigValue(defaults).(map[string]any))
 	}
 	if override != nil {
-		maps.Copy(config, clonePluginRequestValue(override).(map[string]any))
+		maps.Copy(config, clonePluginConfigValue(override).(map[string]any))
 	}
 	return config
+}
+
+// clonePluginConfigValue keeps manifest defaults and channel overrides isolated
+// from callers that may mutate nested JSON values.
+func clonePluginConfigValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, item := range typed {
+			cloned[key] = clonePluginConfigValue(item)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = clonePluginConfigValue(item)
+		}
+		return cloned
+	case []string:
+		return slices.Clone(typed)
+	case map[string][]string:
+		cloned := make(map[string][]string, len(typed))
+		for key, values := range typed {
+			cloned[key] = slices.Clone(values)
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 // CloneUsageSchema copies schema fields and localized metadata for independent readers.
@@ -1166,7 +1187,7 @@ func decodeMeta(value any) (Meta, error) {
 		if len(encoded) > 64<<10 {
 			return Meta{}, fmt.Errorf("plugin meta configDefaults must not exceed 64 KiB")
 		}
-		meta.ConfigDefaults = clonePluginRequestValue(config).(map[string]any)
+		meta.ConfigDefaults = clonePluginConfigValue(config).(map[string]any)
 	}
 	if usageSchema, exists := object["usageSchema"]; exists {
 		meta.UsageSchema, err = decodeUsageSchema(usageSchema)

@@ -51,6 +51,25 @@ func TestRegistrySnapshotSeparatesLayersWithoutExposingEntries(t *testing.T) {
 	assert.Equal(t, "1.0.0-override", plugin.Meta.Version)
 }
 
+func TestEffectiveConfigKeepsNestedChannelValuesIndependent(t *testing.T) {
+	defaults := map[string]any{
+		"region": "cn-beijing",
+		"voices": []any{map[string]any{"name": "default"}},
+	}
+	override := map[string]any{
+		"region":   "ap-southeast-1",
+		"settings": map[string]any{"formats": []string{"mp3"}},
+	}
+
+	config := EffectiveConfig(defaults, override)
+	assert.Equal(t, "ap-southeast-1", config["region"])
+	config["voices"].([]any)[0].(map[string]any)["name"] = "changed"
+	config["settings"].(map[string]any)["formats"].([]string)[0] = "wav"
+
+	assert.Equal(t, "default", defaults["voices"].([]any)[0].(map[string]any)["name"])
+	assert.Equal(t, "mp3", override["settings"].(map[string]any)["formats"].([]string)[0])
+}
+
 func TestRegistryRejectsPluginKeyLongerThanTaskPlatformColumn(t *testing.T) {
 	source := `export const meta = {apiVersion: 1, key: "1234567890123456789012345678901", name: "Long", version: "1", author: {name: "Test"}};`
 	_, err := NewRegistry().Register(source, Options{})
