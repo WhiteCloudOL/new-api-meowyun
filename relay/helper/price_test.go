@@ -50,6 +50,13 @@ func TestTextBudgetUsesFinalOutgoingLimits(t *testing.T) {
 		{"overflowed cap", `{"max_tokens":18446744073686646784}`, 0, true},
 		{"null cap", `{"max_tokens":null}`, 0, true},
 		{"string count", `{"max_tokens":100,"n":"4"}`, 0, true},
+		{"duplicate cap", `{"max_tokens":1,"max_tokens":100000}`, 0, true},
+		{"escaped duplicate cap", `{"max_tokens":1,"max_\u0074okens":100000}`, 0, true},
+		{"duplicate candidates", `{"max_tokens":100,"n":1,"n":128}`, 0, true},
+		{"case alias duplicate cap", `{"max_tokens":1,"MAX_TOKENS":100000}`, 0, true},
+		{"noncanonical ignored cap", `{"MAX_TOKENS":100}`, 0, true},
+		{"duplicate Gemini parent", `{"generationConfig":{"maxOutputTokens":1},"generationConfig":{"maxOutputTokens":100000}}`, 0, true},
+		{"Gemini protocol aliases", `{"generationConfig":{"maxOutputTokens":1},"generation_config":{"max_output_tokens":100}}`, 300, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -61,7 +68,7 @@ func TestTextBudgetUsesFinalOutgoingLimits(t *testing.T) {
 			switch tc.name {
 			case "converted responses cap":
 				info.FinalRequestRelayFormat = types.RelayFormatOpenAIResponses
-			case "converted gemini candidates":
+			case "converted gemini candidates", "duplicate Gemini parent", "Gemini protocol aliases":
 				info.FinalRequestRelayFormat = types.RelayFormatGemini
 			}
 			body, err := PrepareTextBillingBody(ctx, info, strings.NewReader(tc.body))

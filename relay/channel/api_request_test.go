@@ -54,6 +54,7 @@ func TestDoRequestEnforcesBudgetBeforeContactingUpstream(t *testing.T) {
 	}{
 		{"missing limit", `{}`, false, 400},
 		{"wrong protocol limit", `{"max_output_tokens":100}`, false, 400},
+		{"duplicate passthrough limit", `{"max_tokens":1,"max_tokens":100000}`, false, 400},
 		{"insufficient balance", `{"max_tokens":100}`, true, 403},
 		{"funded request", `{"max_tokens":100}`, false, 200},
 	} {

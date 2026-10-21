@@ -24,6 +24,32 @@ import (
 // provider's per-candidate output-token ceiling.
 const MaxTextCandidates = 128
 
+// Duplicate limit fields (including duplicate parent objects) are ambiguous:
+// JSON consumers differ in choosing the first or last value. Inspect decoded
+// keys so escaped spellings cannot hide a second effective limit either.
+func textOutputLimitField(object gjson.Result, path string) (gjson.Result, bool) {
+	for part := range strings.SplitSeq(path, ".") {
+		var value gjson.Result
+		matches := 0
+		ambiguous := false
+		object.ForEach(func(key, candidate gjson.Result) bool {
+			if strings.EqualFold(key.String(), part) {
+				matches++
+				value = candidate
+				// SDK JSON decoders may match case-insensitively, while HTTP
+				// providers ignore non-canonical keys. Neither is safe to guess.
+				ambiguous = ambiguous || key.String() != part
+			}
+			return matches < 2
+		})
+		if matches > 1 || ambiguous {
+			return gjson.Result{}, true
+		}
+		object = value
+	}
+	return object, false
+}
+
 // PrepareTextBillingBody also covers non-HTTP transports (AWS SDK and provider
 // WebSockets). Replayable storage is inspected without consuming its cursor.
 func PrepareTextBillingBody(c *gin.Context, info *relaycommon.RelayInfo, body io.Reader) (io.Reader, error) {
@@ -81,8 +107,9 @@ func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []
 	case types.RelayFormatClaude:
 		capPaths, countPaths = []string{"max_tokens"}, nil
 	case types.RelayFormatGemini:
-		capPaths = []string{"generationConfig.maxOutputTokens"}
-		countPaths = []string{"generationConfig.candidateCount"}
+		// Protobuf JSON accepts both field names and lowerCamelCase names.
+		capPaths = []string{"generationConfig.maxOutputTokens", "generationConfig.max_output_tokens", "generation_config.maxOutputTokens", "generation_config.max_output_tokens"}
+		countPaths = []string{"generationConfig.candidateCount", "generationConfig.candidate_count", "generation_config.candidateCount", "generation_config.candidate_count"}
 	}
 	if info.ChannelMeta != nil {
 		switch info.ApiType {
@@ -103,9 +130,13 @@ func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []
 			capPaths, countPaths = nil, nil
 		}
 	}
+	object := gjson.ParseBytes(body)
 	maxOutput := float64(0)
 	for _, path := range capPaths {
-		value := gjson.GetBytes(body, path)
+		value, ambiguous := textOutputLimitField(object, path)
+		if ambiguous {
+			return types.NewErrorWithStatusCode(fmt.Errorf("%s", i18n.T(c, i18n.MsgQuotaOutputQuantityInvalid, map[string]any{"Field": path})), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
 		if !value.Exists() {
 			continue
 		}
@@ -117,7 +148,10 @@ func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []
 	}
 	candidates := float64(1)
 	for _, path := range countPaths {
-		value := gjson.GetBytes(body, path)
+		value, ambiguous := textOutputLimitField(object, path)
+		if ambiguous {
+			return types.NewErrorWithStatusCode(fmt.Errorf("%s", i18n.T(c, i18n.MsgQuotaOutputQuantityInvalid, map[string]any{"Field": path})), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
 		if !value.Exists() {
 			continue
 		}
