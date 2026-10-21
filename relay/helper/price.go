@@ -96,6 +96,9 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		if err != nil {
 			return hosttypes.PriceData{}, err
 		}
+		if info.ForcePreConsume {
+			preConsumeMultiplier = max(1, preConsumeMultiplier)
+		}
 		preConsumedTokens := float64(promptTokens) * preConsumeMultiplier
 		var success bool
 		var matchName string
@@ -353,6 +356,9 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 	preConsumeMultiplier, err := operation_setting.InputPreConsumeMultiplier()
 	if err != nil {
 		return hosttypes.PriceData{}, err
+	}
+	if info.ForcePreConsume {
+		preConsumeMultiplier = max(1, preConsumeMultiplier)
 	}
 
 	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info)

@@ -468,6 +468,8 @@ Expression reservation uses an interval upper bound over output quantities from 
 
 Outside strict text generation, wallet trust bypass uses `quota_setting.trust_quota_usd` (default 0, disabled; a positive value explicitly enables bypass). Both the wallet and any limited API token must exceed the threshold. The wallet must still cover the estimated reservation before bypass is considered. Subscriptions and asynchronous tasks do not use this bypass. Task usage pricing is unchanged.
 
+Character-counted speech requests use their actual input Unicode character count, not tokenizer counts, a 100-character minimum, or the text-generation 100,000-output-token estimate. Character counting remains enabled when optional token estimation is off. These requests force funded pre-consumption without trust bypass or a multiplier below one; their existing character prices and actual-usage settlement are unchanged. Token-counted speech retains its separate billing path.
+
 ### 4. Settlement (Actual Billing)
 
 **Files**: `service/tiered_settle.go`, `pkg/billingexpr/settle.go`

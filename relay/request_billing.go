@@ -23,14 +23,21 @@ import (
 // provide the current request body through BodyStorage or BillingRequestInput;
 // channel retries retain the resulting billing session and pricing snapshot.
 func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
-	switch info.Request.(type) {
+	meta := &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
+	characterSpeech := false
+	switch request := info.Request.(type) {
 	case *dto.GeneralOpenAIRequest, *dto.OpenAIResponsesRequest, *dto.ClaudeRequest, *dto.GeminiChatRequest:
 		info.EnforceTextBudget = true
 		info.ForcePreConsume = true
+	case *dto.AudioRequest:
+		meta = request.GetTokenCountMeta()
+		characterSpeech = meta.TokenType == types.TokenTypeTextNumber
+		if characterSpeech {
+			info.ForcePreConsume = true
+		}
 	}
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
-	meta := &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
-	if info.Request != nil && (needSensitiveCheck || constant.CountToken || info.EnforceTextBudget) {
+	if info.Request != nil && (needSensitiveCheck || constant.CountToken || info.EnforceTextBudget || characterSpeech) {
 		meta = info.Request.GetTokenCountMeta()
 	} else {
 		// Avoid building CombineText when only the pricing quantities are needed.
@@ -57,8 +64,9 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 
 	var tokens int
 	var err error
-	if info.EnforceTextBudget {
-		// Strict prepaid admission cannot use a disabled input estimate.
+	if info.EnforceTextBudget || characterSpeech {
+		// Character-counted speech must fund its actual input independently of
+		// optional token estimation. It never reserves text-generation output.
 		tokens, err = service.CountRequestToken(c, meta, info)
 	} else {
 		tokens, err = service.EstimateRequestToken(c, meta, info)
