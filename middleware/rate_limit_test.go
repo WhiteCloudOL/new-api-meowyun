@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,29 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPasswordAccountRateLimitSurvivesIPAndAliasChanges(t *testing.T) {
+	server, client := useRateLimitMiniRedis(t)
+	for attempt := range 11 {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/user/login", nil)
+		c.Request.RemoteAddr = "192.0.2." + strconv.Itoa(attempt+1) + ":1234"
+		allowed := TakePasswordLoginAttempt(c, 42, "different-alias")
+		assert.Equal(t, attempt < 10, allowed)
+		if attempt == 10 {
+			assert.Equal(t, http.StatusTooManyRequests, c.Writer.Status())
+			assert.NotEmpty(t, response.Header().Get("Retry-After"))
+		}
+	}
+	server.FastForward(10 * time.Minute)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/login", nil)
+	assert.True(t, TakePasswordLoginAttempt(c, 42, "original-alias"))
+	require.NoError(t, client.Close())
+	assert.False(t, TakePasswordLoginAttempt(c, 43, "another-user"), "Redis failures must not bypass the account limit")
+	assert.Equal(t, http.StatusServiceUnavailable, c.Writer.Status())
+}
 
 func useRateLimitMiniRedis(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
 	t.Helper()

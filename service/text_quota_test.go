@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,6 +91,56 @@ func TestFixedPriceBillingDatabaseMatrix(t *testing.T) {
 			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
 			t.Logf("database: %s", version)
 			runFixedPriceAccountingCases(t, db, logDB)
+			t.Run("concurrent maximum-output admission", func(t *testing.T) {
+				user := model.User{Username: "prepaid_concurrent", Quota: 200, Status: common.UserStatusEnabled}
+				require.NoError(t, db.Create(&user).Error)
+				t.Cleanup(func() { require.NoError(t, db.Unscoped().Delete(&user).Error) })
+				var infos [2]*relaycommon.RelayInfo
+				var contexts [2]*gin.Context
+				for i := range infos {
+					token := model.Token{UserId: user.Id, Key: fmt.Sprintf("prepaid-concurrent-%d", i), Name: "prepaid", RemainQuota: 200, Status: common.TokenStatusEnabled}
+					require.NoError(t, db.Create(&token).Error)
+					t.Cleanup(func() { require.NoError(t, db.Unscoped().Delete(&token).Error) })
+					contexts[i], _ = gin.CreateTestContext(httptest.NewRecorder())
+					contexts[i].Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+					infos[i] = &relaycommon.RelayInfo{UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, ForcePreConsume: true, UserSetting: dto.UserSetting{BillingPreference: "wallet_only"}}
+					require.Nil(t, PreConsumeBilling(contexts[i], 0, infos[i]))
+				}
+				var results [2]*types.NewAPIError
+				var wait sync.WaitGroup
+				start := make(chan struct{})
+				for i := range infos {
+					wait.Go(func() { <-start; results[i] = PreConsumeBilling(contexts[i], 140, infos[i]) })
+				}
+				close(start)
+				wait.Wait()
+				winner := 0
+				if results[0] != nil {
+					winner = 1
+				}
+				require.Nil(t, results[winner])
+				require.NotNil(t, results[1-winner])
+				assert.Equal(t, types.ErrorCodeInsufficientUserQuota, results[1-winner].GetErrorCode())
+				assert.Equal(t, 140, infos[winner].Billing.GetPreConsumedQuota())
+				assert.Zero(t, infos[1-winner].Billing.GetPreConsumedQuota())
+				balance, err := model.GetUserQuota(user.Id, false)
+				require.NoError(t, err)
+				assert.Equal(t, 60, balance, "the losing request cannot borrow the remaining balance")
+				require.NoError(t, infos[winner].Billing.Settle(90))
+				require.NoError(t, infos[winner].Billing.Settle(90))
+				balance, err = model.GetUserQuota(user.Id, false)
+				require.NoError(t, err)
+				assert.Equal(t, 110, balance, "unused output reserve is refunded exactly once")
+				for i, info := range infos {
+					var token model.Token
+					require.NoError(t, db.First(&token, info.TokenId).Error)
+					want := 200
+					if i == winner {
+						want = 110
+					}
+					assert.Equal(t, want, token.RemainQuota)
+				}
+			})
 		})
 	}
 }

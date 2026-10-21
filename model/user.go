@@ -1054,6 +1054,36 @@ func deleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 	return deleteUserOAuthBindingsByUserId(tx, userId)
 }
 
+// GetPasswordLoginAccount resolves username/email aliases before rate limiting.
+// The result contains a password hash and is for server-side authentication
+// only; never serialize it into a response or an audit event.
+func GetPasswordLoginAccount(identifier string) (*User, error) {
+	var user User
+	err := DB.Where("username = ? OR email = ?", strings.TrimSpace(identifier), strings.TrimSpace(identifier)).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &User{}, nil
+	}
+	return &user, err
+}
+
+func (user *User) CheckPasswordForLogin(password string) error {
+	if password == "" {
+		return ErrInvalidCredentials
+	}
+	if user.Id <= 0 || user.Password == "" {
+		// Public dummy parameters, not an account credential. Unknown/passwordless
+		// accounts still perform the current password KDF instead of exposing an
+		// immediate-return account-enumeration shortcut. Never accept its result.
+		const dummy = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		common.ValidatePasswordAndHash(password, dummy)
+		return ErrInvalidCredentials
+	}
+	if !common.ValidatePasswordAndHash(password, user.Password) || user.Status != common.UserStatusEnabled {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
 // ValidateAndFill check password & user status
 func (user *User) ValidateAndFill() (err error) {
 	// When querying with struct, GORM will only query with non-zero fields,
@@ -1075,11 +1105,7 @@ func (user *User) ValidateAndFill() (err error) {
 	if user.Password == "" {
 		return ErrInvalidCredentials
 	}
-	okay := common.ValidatePasswordAndHash(password, user.Password)
-	if !okay || user.Status != common.UserStatusEnabled {
-		return ErrInvalidCredentials
-	}
-	return nil
+	return user.CheckPasswordForLogin(password)
 }
 
 func (user *User) FillUserById() error {

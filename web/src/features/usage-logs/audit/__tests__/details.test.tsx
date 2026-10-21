@@ -490,6 +490,7 @@ it.each([
     'Logged in successfully via Password',
   ],
   ['security', 'user.2fa_enable', {}, 'Enabled two-factor authentication'],
+  ['login', 'login_failed', {}, 'Login failed'],
   ['access_token', 'access_token.request', {}, 'Access Token'],
 ])(
   'shows summary and result for %s records',

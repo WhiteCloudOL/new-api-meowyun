@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
@@ -73,7 +75,18 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	// xunfei's request is not http request, so we don't need to do anything here
+	// This adaptor submits its stored request in DoResponse rather than the
+	// shared HTTP transport. Reserve against that exact request, not a body
+	// override which this legacy adaptor does not send.
+	if info.EnforceTextBudget {
+		body, err := common.Marshal(a.request)
+		if err != nil {
+			return nil, err
+		}
+		if err := helper.ReserveTextOutputQuota(c, info, body); err != nil {
+			return nil, err
+		}
+	}
 	dummyResp := &http.Response{}
 	dummyResp.StatusCode = http.StatusOK
 	return dummyResp, nil

@@ -472,6 +472,7 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'user.email_binding_resend': 'Email confirmation code resend',
 
   login: 'Logged in successfully via {{method}}',
+  login_failed: 'Login failed',
   // User management
   'user.create': 'Created user {{username}} (role {{role}})',
   'user.update': 'Updated user {{username}} (ID: {{id}})',

@@ -1,16 +1,91 @@
 package channel
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type prepaidTestReservation struct {
+	held int
+	deny bool
+}
+
+func (s *prepaidTestReservation) Settle(int) error         { return nil }
+func (s *prepaidTestReservation) Refund(*gin.Context)      {}
+func (s *prepaidTestReservation) NeedsRefund() bool        { return false }
+func (s *prepaidTestReservation) GetPreConsumedQuota() int { return s.held }
+func (s *prepaidTestReservation) Reserve(n int) error      { return s.ReserveBeforeSubmit(n) }
+func (s *prepaidTestReservation) ReserveBeforeSubmit(n int) error {
+	if s.deny {
+		return types.NewErrorWithStatusCode(fmt.Errorf("insufficient test balance"), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+	}
+	s.held = max(s.held, n)
+	return nil
+}
+
+func TestDoRequestEnforcesBudgetBeforeContactingUpstream(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	service.InitHttpClient()
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = io.Copy(w, r.Body)
+	}))
+	defer upstream.Close()
+	for _, tc := range []struct {
+		name, body string
+		deny       bool
+		status     int
+	}{
+		{"missing limit", `{}`, false, 400},
+		{"wrong protocol limit", `{"max_output_tokens":100}`, false, 400},
+		{"insufficient balance", `{"max_tokens":100}`, true, 403},
+		{"funded request", `{"max_tokens":100}`, false, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls.Store(0)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			reservation := &prepaidTestReservation{deny: tc.deny}
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}, EnforceTextBudget: true, Billing: reservation,
+				PriceData: hosttypes.PriceData{ModelRatio: 1, CompletionRatio: 2, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}}}
+			info.SetEstimatePromptTokens(100)
+			req, err := http.NewRequest(http.MethodPost, upstream.URL, bytes.NewBufferString(tc.body))
+			require.NoError(t, err)
+			response, err := doRequest(ctx, req, info)
+			if tc.status != 200 {
+				require.Error(t, err)
+				apiErr := types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, 500)
+				assert.Equal(t, tc.status, apiErr.StatusCode)
+				assert.True(t, types.IsSkipRetryError(apiErr))
+				assert.Zero(t, calls.Load())
+				return
+			}
+			require.NoError(t, err)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			assert.Equal(t, tc.body, string(body))
+			assert.EqualValues(t, 1, calls.Load())
+			assert.GreaterOrEqual(t, reservation.held, 300)
+		})
+	}
+}
 
 func TestNewTaskAPIRequestInheritsClientCancellation(t *testing.T) {
 	recorder := httptest.NewRecorder()

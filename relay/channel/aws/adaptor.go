@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -176,7 +177,11 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 	if a.ClientMode == ClientModeApiKey {
 		return channel.DoApiRequest(a, c, info, requestBody)
 	} else {
-		return doAwsClientRequest(c, info, a, requestBody)
+		body, err := helper.PrepareTextBillingBody(c, info, requestBody)
+		if err != nil {
+			return nil, err
+		}
+		return doAwsClientRequest(c, info, a, body)
 	}
 }
 

@@ -4,16 +4,66 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFileDownloadCancellationAndDeadline(t *testing.T) {
+	configureSSRFTestFetchSetting(t)
+	previousClient, previousWorker := httpClient, system_setting.WorkerUrl
+	t.Cleanup(func() { httpClient, system_setting.WorkerUrl = previousClient, previousWorker })
+	// Exercise the SSRF-disabled fallback too: relay clients may have no timeout.
+	system_setting.GetFetchSetting().EnableSSRFProtection = false
+	system_setting.WorkerUrl = ""
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		close(started)
+		<-r.Context().Done()
+		close(stopped)
+	}))
+	t.Cleanup(server.Close)
+	httpClient = server.Client()
+	httpClient.Timeout = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	response, err := DoDownloadRequestWithContext(ctx, server.URL)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	deadline, bounded := response.Request.Context().Deadline()
+	assert.True(t, bounded, "downloads must have a deadline even with unlimited relay timeout")
+	assert.True(t, deadline.After(time.Now()))
+	<-started
+	cancel()
+	_, err = io.ReadAll(response.Body)
+	assert.ErrorIs(t, err, context.Canceled)
+	<-stopped
+	assert.Zero(t, httpClient.Timeout, "shared generation client must remain unchanged")
+}
+
+func TestFileSourceRejectsCancelledIncomingRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+	data, err := loadFromURL(c, "https://example.com/file")
+	assert.Nil(t, data)
+	assert.ErrorIs(t, err, context.Canceled)
+}
 
 type staticSSRFResolver map[string][]net.IPAddr
 

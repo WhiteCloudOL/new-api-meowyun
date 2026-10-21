@@ -1,6 +1,76 @@
 package controller
 
-import "github.com/QuantumNous/new-api/model"
+import (
+	"fmt"
+	"reflect"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+)
+
+// A round-trip marker, never an upstream header value. All literal headers are
+// confidential: credentials can use arbitrary names, not only Authorization.
+const redactedChannelHeader = "__NEW_API_REDACTED_HEADER__"
+
+func redactChannelHeaders(channel *model.Channel) {
+	if channel.HeaderOverride == nil || *channel.HeaderOverride == "" {
+		return
+	}
+	var headers map[string]any
+	if err := common.UnmarshalJsonStr(*channel.HeaderOverride, &headers); err != nil {
+		channel.HeaderOverride = nil // fail closed on legacy malformed configuration
+		return
+	}
+	for key, value := range headers {
+		if _, literal := value.(string); literal {
+			headers[key] = redactedChannelHeader
+		}
+	}
+	encoded, err := common.Marshal(headers)
+	if err != nil {
+		channel.HeaderOverride = nil
+		return
+	}
+	channel.HeaderOverride = common.GetPointer(string(encoded))
+}
+
+// Restore unchanged redacted entries from storage before authorization checks.
+// This preserves credentials when a read-only operator edits routing fields.
+func restoreChannelHeaders(channel *model.Channel, origin *model.Channel) error {
+	if channel.HeaderOverride == nil || *channel.HeaderOverride == "" {
+		return nil
+	}
+	var headers map[string]any
+	if err := common.UnmarshalJsonStr(*channel.HeaderOverride, &headers); err != nil {
+		return err
+	}
+	var original map[string]any
+	if origin.HeaderOverride != nil && *origin.HeaderOverride != "" {
+		if err := common.UnmarshalJsonStr(*origin.HeaderOverride, &original); err != nil {
+			return err
+		}
+	}
+	for key, value := range headers {
+		if value != redactedChannelHeader {
+			continue
+		}
+		old, exists := original[key]
+		if !exists {
+			return fmt.Errorf("redacted header has no stored value")
+		}
+		headers[key] = old
+	}
+	if reflect.DeepEqual(headers, original) {
+		channel.HeaderOverride = origin.HeaderOverride
+		return nil
+	}
+	encoded, err := common.Marshal(headers)
+	if err != nil {
+		return err
+	}
+	channel.HeaderOverride = common.GetPointer(string(encoded))
+	return nil
+}
 
 func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, requestData map[string]any) bool {
 	if _, ok := requestData["type"]; ok && channel.Type != origin.Type {

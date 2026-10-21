@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -37,6 +38,35 @@ return {1, count, ttl}
 `
 
 var inMemoryRateLimiter common.InMemoryRateLimiter
+
+// TakePasswordLoginAttempt supplements the IP limiter with an account-wide
+// budget, so changing IPs or alternating username/email cannot bypass it.
+// Redis is authoritative across instances; an outage fails closed.
+func TakePasswordLoginAttempt(c *gin.Context, accountID int, identifier string) bool {
+	const attempts, seconds = 10, 600
+	subject := strconv.Itoa(accountID)
+	if accountID <= 0 {
+		subject = "unknown:" + common.GenerateHMAC(strings.ToLower(strings.TrimSpace(identifier)))
+	}
+	key := redisRateLimitNamespace + ":password-account:" + subject
+	if common.RedisEnabled {
+		allowed, _, ttl, err := redisFixedWindowTake(c.Request.Context(), key, attempts, seconds)
+		if err != nil {
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+			return false
+		}
+		if !allowed {
+			writeRateLimited(c, ttl)
+		}
+		return allowed
+	}
+	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+	if !inMemoryRateLimiter.Request(key, attempts, seconds) {
+		writeRateLimited(c, seconds)
+		return false
+	}
+	return true
+}
 
 var defNext = func(c *gin.Context) {
 	c.Next()

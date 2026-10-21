@@ -383,6 +383,11 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 // request context, and reports a rejected handshake as a *types.NewAPIError
 // carrying the upstream status code (types.NewError preserves it).
 func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*websocket.Conn, error) {
+	var err error
+	requestBody, err = helper.PrepareTextBillingBody(c, info, requestBody)
+	if err != nil {
+		return nil, err
+	}
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
@@ -455,6 +460,20 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	if info.EnforceTextBudget {
+		if req.GetBody == nil {
+			return nil, types.NewErrorWithStatusCode(fmt.Errorf("text request body must be replayable for prepaid billing"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		_, budgetErr := helper.PrepareTextBillingBody(c, info, body)
+		_ = body.Close()
+		if budgetErr != nil {
+			return nil, budgetErr
+		}
+	}
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)

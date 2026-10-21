@@ -61,7 +61,19 @@ func Login(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	username := loginRequest.Username
+	username := strings.TrimSpace(loginRequest.Username)
+	if username == "" || len(username) > 254 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	account, err := model.GetPasswordLoginAccount(username)
+	if err != nil {
+		common.ApiErrorT(c, "Database error, please contact the administrator")
+		return
+	}
+	if !middleware.TakePasswordLoginAttempt(c, account.Id, username) {
+		return
+	}
 	password := loginRequest.Password
 	if common.PasswordLoginEncryptionEnabled {
 		if loginRequest.PasswordEncrypted == "" || loginRequest.EncryptionKeyID == "" {
@@ -70,6 +82,7 @@ func Login(c *gin.Context) {
 		}
 		password, err = common.DecryptPassword(loginRequest.PasswordEncrypted, loginRequest.EncryptionKeyID)
 		if err != nil {
+			recordFailedPasswordLogin(account, c)
 			common.ApiErrorT(c, "Username or password is incorrect, or user has been banned")
 			return
 		}
@@ -78,11 +91,8 @@ func Login(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	user := model.User{
-		Username: username,
-		Password: password,
-	}
-	err = user.ValidateAndFill()
+	user := *account
+	err = user.CheckPasswordForLogin(password)
 	if err != nil {
 		switch {
 		case errors.Is(err, model.ErrDatabase):
@@ -91,12 +101,22 @@ func Login(c *gin.Context) {
 		case errors.Is(err, model.ErrUserEmptyCredentials):
 			common.ApiErrorT(c, "Invalid parameters")
 		default:
+			recordFailedPasswordLogin(account, c)
 			common.ApiErrorT(c, "Username or password is incorrect, or user has been banned")
 		}
 		return
 	}
 
 	setupLogin(&user, nil, c)
+}
+
+func recordFailedPasswordLogin(account *model.User, c *gin.Context) {
+	model.RecordAuditLog(c, model.AuditLog{
+		UserId: account.Id, Username: account.Username, ActorRole: account.Role,
+		Category: model.AuditCategoryLogin, Action: "login_failed", AuthMethod: "password",
+		Status: http.StatusUnauthorized, Success: false, Content: "Login failed",
+		Other: model.AuditOther{LoginMethod: "password", Op: &model.AuditOperation{Action: "login_failed"}},
+	})
 }
 
 // loginMethodFromContext 根据请求路径推导登录方式，用于登录审计日志。

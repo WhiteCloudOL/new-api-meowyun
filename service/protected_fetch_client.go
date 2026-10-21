@@ -108,8 +108,9 @@ func newProtectedFetchHTTPClientWithProxy(resolver ssrfResolver, dialContext fun
 			transports:    make(map[string]*http.Transport),
 		},
 		CheckRedirect: checkProtectedFetchRedirect,
+		Timeout:       fileDownloadTimeout,
 	}
-	if common.RelayTimeout != 0 {
+	if common.RelayTimeout > 0 && common.RelayTimeout < int(fileDownloadTimeout/time.Second) {
 		client.Timeout = time.Duration(common.RelayTimeout) * time.Second
 	}
 	return client
@@ -172,12 +173,15 @@ func (t *ssrfProtectedRoundTripper) newTransport(proxyURL *url.URL) *http.Transp
 	}
 
 	transport := &http.Transport{
-		MaxIdleConns:        common.RelayMaxIdleConns,
-		MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
-		IdleConnTimeout:     time.Duration(common.RelayIdleConnTimeout) * time.Second,
-		ForceAttemptHTTP2:   true,
-		Proxy:               proxyFunc,
-		DialContext:         dialContext,
+		MaxIdleConns:          common.RelayMaxIdleConns,
+		MaxIdleConnsPerHost:   common.RelayMaxIdleConnsPerHost,
+		IdleConnTimeout:       time.Duration(common.RelayIdleConnTimeout) * time.Second,
+		ForceAttemptHTTP2:     true,
+		Proxy:                 proxyFunc,
+		DialContext:           dialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: time.Second,
 	}
 	if common.TLSInsecureSkipVerify {
 		transport.TLSClientConfig = common.InsecureTLSConfig.Clone()

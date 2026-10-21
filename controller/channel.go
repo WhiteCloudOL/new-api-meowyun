@@ -67,6 +67,7 @@ func parseStatusFilter(statusParam string) int {
 }
 
 func clearChannelInfo(channel *model.Channel) {
+	redactChannelHeaders(channel)
 	if channel.ChannelInfo.IsMultiKey {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
 		channel.ChannelInfo.MultiKeyDisabledTime = nil
@@ -517,7 +518,8 @@ func GetChannelKey(c *gin.Context) {
 
 	// 返回渠道密钥
 	common.ApiSuccessT(c, "Fetched successfully", map[string]any{
-		"key": channel.Key,
+		"key":             channel.Key,
+		"header_override": channel.HeaderOverride,
 	})
 }
 
@@ -1126,6 +1128,10 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	originProxy := originChannel.GetSetting().Proxy
+	if err := restoreChannelHeaders(&channel.Channel, originChannel); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
 	proxyChanged := false
 	_, settingProvided := requestData["setting"]
 	if settingProvided {
@@ -1418,6 +1424,7 @@ func buildAdvancedCustomModelPreviewChannel(req fetchModelsRequest) (*model.Chan
 	channel.SetOtherSettings(settings)
 
 	if req.HeaderOverride != nil {
+		original := *channel
 		rawHeaderOverride := strings.TrimSpace(*req.HeaderOverride)
 		if rawHeaderOverride != "" {
 			var headerOverride map[string]any
@@ -1426,6 +1433,9 @@ func buildAdvancedCustomModelPreviewChannel(req fetchModelsRequest) (*model.Chan
 			}
 		}
 		channel.HeaderOverride = &rawHeaderOverride
+		if err := restoreChannelHeaders(channel, &original); err != nil {
+			return nil, err
+		}
 	}
 	if req.Proxy != nil {
 		channelSettings := channel.GetSetting()

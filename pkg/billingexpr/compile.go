@@ -110,12 +110,13 @@ func usesRequestProbe(node ast.Node) bool {
 }
 
 type cachedEntry struct {
-	prog          *vm.Program
-	usedVars      map[string]bool
-	usedUsageKeys map[string]bool
-	requestRules  []RequestRuleTrace
-	version       int
-	fixedPricing  bool
+	reservationTree ast.Node // Unoptimized tree, including otherwise unreachable price branches.
+	prog            *vm.Program
+	usedVars        map[string]bool
+	usedUsageKeys   map[string]bool
+	requestRules    []RequestRuleTrace
+	version         int
+	fixedPricing    bool
 }
 
 var (
@@ -218,12 +219,13 @@ func compileEntryFromCacheByHash(exprStr, hash string) (*cachedEntry, error) {
 	}
 
 	entry := &cachedEntry{
-		prog:          prog,
-		usedVars:      extractUsedVars(prog),
-		usedUsageKeys: extractUsedUsageKeys(prog),
-		requestRules:  patcher.requestRules,
-		version:       version,
-		fixedPricing:  fixedPricing,
+		reservationTree: tree.Node,
+		prog:            prog,
+		usedVars:        extractUsedVars(prog),
+		usedUsageKeys:   extractUsedUsageKeys(prog),
+		requestRules:    patcher.requestRules,
+		version:         version,
+		fixedPricing:    fixedPricing,
 	}
 	cacheMu.Lock()
 	if len(cache) >= maxCacheSize {

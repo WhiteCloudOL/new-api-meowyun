@@ -2,8 +2,11 @@ package helper
 
 import (
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -18,10 +21,113 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTextBudgetUsesFinalOutgoingLimits(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	previous := operation_setting.GetQuotaSetting().PreConsumeMultiplier
+	operation_setting.GetQuotaSetting().PreConsumeMultiplier = 0.5
+	t.Cleanup(func() { operation_setting.GetQuotaSetting().PreConsumeMultiplier = previous })
+	for _, tc := range []struct {
+		name, body string
+		want       int
+		invalid    bool
+	}{
+		{"chat cap", `{"max_tokens":100}`, 300, false},
+		{"converted responses cap", `{"max_output_tokens":200}`, 500, false},
+		{"converted gemini candidates", `{"generationConfig":{"maxOutputTokens":100,"candidateCount":3}}`, 700, false},
+		{"completion best_of", `{"max_tokens":100,"n":1,"best_of":4}`, 900, false},
+		{"unbounded output", `{}`, 0, true},
+		{"fake cap inside tool", `{"tools":[{"max_tokens":100}]}`, 0, true},
+		{"fake cap from another protocol", `{"generationConfig":{"maxOutputTokens":100}}`, 0, true},
+		{"negative cap", `{"max_tokens":-1}`, 0, true},
+		{"fractional count", `{"max_tokens":100,"n":1.5}`, 0, true},
+		{"oversized count", `{"max_tokens":100,"n":129}`, 0, true},
+		{"overflowed cap", `{"max_tokens":18446744073686646784}`, 0, true},
+		{"null cap", `{"max_tokens":null}`, 0, true},
+		{"string count", `{"max_tokens":100,"n":"4"}`, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			reserved := &priceTestReservation{}
+			info := &relaycommon.RelayInfo{EnforceTextBudget: true, Billing: reserved,
+				PriceData: hosttypes.PriceData{ModelRatio: 1, CompletionRatio: 2, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}}}
+			info.SetEstimatePromptTokens(100)
+			switch tc.name {
+			case "converted responses cap":
+				info.FinalRequestRelayFormat = types.RelayFormatOpenAIResponses
+			case "converted gemini candidates":
+				info.FinalRequestRelayFormat = types.RelayFormatGemini
+			}
+			body, err := PrepareTextBillingBody(ctx, info, strings.NewReader(tc.body))
+			if tc.invalid {
+				require.Error(t, err)
+				apiErr := types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+				assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+				assert.True(t, types.IsSkipRetryError(apiErr))
+				assert.Zero(t, reserved.held)
+				return
+			}
+			require.NoError(t, err)
+			outgoing, err := io.ReadAll(body)
+			require.NoError(t, err)
+			assert.Equal(t, tc.body, string(outgoing), "budget inspection must not consume the outgoing payload")
+			assert.Equal(t, tc.want, reserved.held)
+			// A larger channel override must raise the reserve before retry.
+			info.FinalRequestRelayFormat = types.RelayFormatOpenAI
+			require.NoError(t, ReserveTextOutputQuota(ctx, info, []byte(`{"max_tokens":500}`)))
+			assert.Equal(t, 1100, reserved.held)
+		})
+	}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	const expression = `c < 50 ? tier("expensive", p * 2 + c * 10) : tier("discount", p)`
+	info := &relaycommon.RelayInfo{EnforceTextBudget: true, FinalRequestRelayFormat: types.RelayFormatOpenAIResponses, Billing: &priceTestReservation{},
+		PriceData:             hosttypes.PriceData{GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{ExprString: expression, ExprHash: billingexpr.ExprHashString(expression), QuotaPerUnit: 500000}}
+	info.SetEstimatePromptTokens(100)
+	require.NoError(t, ReserveTextOutputQuota(ctx, info, []byte(`{"max_output_tokens":100}`)))
+	assert.Equal(t, 600, info.Billing.GetPreConsumedQuota(), "a discount at c=max must not underfund intermediate usage")
+	assert.Equal(t, 100, info.TieredBillingSnapshot.EstimatedCompletionTokens)
+}
+
+func TestTextReservationExpressionBounds(t *testing.T) {
+	for _, tc := range []struct {
+		expression string
+		want       float64
+		invalid    bool
+	}{
+		{`tier("base", p * 2 + c * 10)`, 1200, false},
+		{`c < 50 ? tier("high", c * 10) : tier("low", c)`, 1000, false},
+		{`tier("base", 1000 - c * 2)`, 1000, false},
+		{`len < 200 ? tier("fixed", fixed(0.01)) : tier("tokens", p * 1000)`, 10000, false},
+		{`(p + c) * (param("fast") == true ? 2 : 1)`, 400, false},
+		{`hour("UTC") < 12 ? c * 2 : c * 3`, 300, false},
+		{`max(p * 2, c * 3) + min(c, 10)`, 310, false},
+		{`ceil(abs(c - 20) / 3)`, 27, false},
+		{`(p + cr + cc + cc1h + img + img_cr + ai) * 2 + (c + ao + img_o) * 3`, 2300, false},
+		{`c / (p - 50)`, 0, true},
+		{`c ** 2`, 0, true},
+		{`u("seconds") * 2`, 0, true},
+		{`c * 1e308`, 0, true},
+	} {
+		t.Run(tc.expression, func(t *testing.T) {
+			bound, err := billingexpr.ReservationUpperBound(tc.expression, billingexpr.ExprHashString(tc.expression), 100, 100, billingexpr.RequestInput{Body: []byte(`{"fast":true}`)})
+			if tc.invalid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.InDelta(t, tc.want, bound, 0.000001)
+		})
+	}
+	_, err := billingexpr.ReservationUpperBound(`p + c`, "", 100, math.Inf(1), billingexpr.RequestInput{})
+	require.Error(t, err)
+}
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)

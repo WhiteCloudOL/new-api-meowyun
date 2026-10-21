@@ -21,14 +21,56 @@ import (
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestPasswordLoginFailuresAreAuditedWithoutCredentials(t *testing.T) {
+	user, _ := setupSecurityEnrollmentTest(t)
+	require.NoError(t, model.DB.Model(user).Update("email", "login-audit@example.com").Error)
+	previousEnabled, previousClient := common.RedisEnabled, common.RDB
+	previousLogin := common.PasswordLoginEnabled
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	common.RedisEnabled, common.RDB, common.PasswordLoginEnabled = true, client, true
+	t.Cleanup(func() {
+		common.RedisEnabled, common.RDB, common.PasswordLoginEnabled = previousEnabled, previousClient, previousLogin
+		_ = client.Close()
+	})
+	var publicResponse string
+	for _, identifier := range []string{user.Username, "login-audit@example.com", "missing-account"} {
+		body, err := common.Marshal(map[string]string{"username": identifier, "password": "wrong-secret-password"})
+		require.NoError(t, err)
+		response := securityEnrollmentRequest(http.MethodPost, "/api/user/login", string(body), "", service.AuthIdentity{}, Login)
+		if publicResponse == "" {
+			publicResponse = response.Body.String()
+		}
+		assert.Equal(t, publicResponse, response.Body.String(), "unknown and known accounts must have the same error")
+		assert.Empty(t, response.Header().Values("Set-Cookie"))
+	}
+	var events []model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("action = ?", "login_failed").Order("id").Find(&events).Error)
+	require.Len(t, events, 3)
+	assert.Equal(t, user.Id, events[0].UserId)
+	assert.Equal(t, user.Id, events[1].UserId, "email and username must resolve the same account")
+	assert.Zero(t, events[2].UserId)
+	for _, event := range events {
+		assert.False(t, event.Success)
+		assert.Equal(t, "password", event.AuthMethod)
+		assert.Equal(t, http.StatusUnauthorized, event.Status)
+	}
+	encoded, err := common.Marshal(events)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "wrong-secret-password")
+	assert.NotContains(t, string(encoded), user.Password)
+}
 
 func newSecurityLoginPasskey(t *testing.T, userID int) *ecdsa.PrivateKey {
 	t.Helper()

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -161,7 +162,11 @@ func loadFromURL(c *gin.Context, url string, reason ...string) (*types.CachedFil
 	if common.DebugEnabled {
 		logger.LogDebug(c, "loadFromURL: initiating download")
 	}
-	resp, err := DoDownloadRequest(url, reason...)
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	resp, err := DoDownloadRequestWithContext(ctx, url, reason...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download file from %s: %w", url, err)
 	}

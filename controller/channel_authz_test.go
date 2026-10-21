@@ -15,6 +15,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestChannelReadRedactsHeadersAndPreservesEditRoundTrip(t *testing.T) {
+	origin := &model.Channel{HeaderOverride: common.GetPointer(`{"Authorization":"Bearer secret","X-Custom":"private","X-Client":true}`)}
+	channel := *origin
+	clearChannelInfo(&channel)
+	require.NotNil(t, channel.HeaderOverride)
+	assert.NotContains(t, *channel.HeaderOverride, "secret")
+	assert.NotContains(t, *channel.HeaderOverride, "private")
+	assert.Contains(t, *channel.HeaderOverride, redactedChannelHeader)
+	assert.Contains(t, *origin.HeaderOverride, "secret", "read projection must not modify stored configuration")
+	require.NoError(t, restoreChannelHeaders(&channel, origin))
+	assert.Equal(t, *origin.HeaderOverride, *channel.HeaderOverride)
+	assert.False(t, channelHasSensitiveChanges(&PatchChannel{Channel: channel}, origin, map[string]any{"header_override": *channel.HeaderOverride}))
+
+	channel.HeaderOverride = common.GetPointer(`{"Authorization":"replacement","X-Custom":"__NEW_API_REDACTED_HEADER__"}`)
+	require.NoError(t, restoreChannelHeaders(&channel, origin))
+	assert.JSONEq(t, `{"Authorization":"replacement","X-Custom":"private"}`, *channel.HeaderOverride)
+	assert.True(t, channelHasSensitiveChanges(&PatchChannel{Channel: channel}, origin, map[string]any{"header_override": *channel.HeaderOverride}))
+	channel.HeaderOverride = common.GetPointer(`{"New-Header":"__NEW_API_REDACTED_HEADER__"}`)
+	assert.Error(t, restoreChannelHeaders(&channel, origin))
+}
+
 func TestChannelHasSensitiveChanges(t *testing.T) {
 	baseURL := "https://api.example.com"
 	headerOverride := `{"Authorization":"Bearer {api_key}"}`
