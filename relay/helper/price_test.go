@@ -41,9 +41,15 @@ func TestTextBudgetUsesFinalOutgoingLimits(t *testing.T) {
 		{"converted responses cap", `{"max_output_tokens":200}`, 500, false},
 		{"converted gemini candidates", `{"generationConfig":{"maxOutputTokens":100,"candidateCount":3}}`, 700, false},
 		{"completion best_of", `{"max_tokens":100,"n":1,"best_of":4}`, 900, false},
-		{"unbounded output", `{}`, 0, true},
-		{"fake cap inside tool", `{"tools":[{"max_tokens":100}]}`, 0, true},
-		{"fake cap from another protocol", `{"generationConfig":{"maxOutputTokens":100}}`, 0, true},
+		{"unspecified output", `{}`, 200100, false},
+		{"unspecified streaming output", `{"stream":true}`, 200100, false},
+		{"unspecified multiple candidates", `{"n":3}`, 600100, false},
+		{"unspecified responses output", `{"input":"hello"}`, 200100, false},
+		{"unspecified claude output", `{"messages":[]}`, 200100, false},
+		{"unspecified gemini output", `{"generationConfig":{"candidateCount":2}}`, 400100, false},
+		{"fake cap inside tool", `{"tools":[{"max_tokens":100}]}`, 200100, false},
+		{"fake cap from another protocol", `{"generationConfig":{"maxOutputTokens":100}}`, 200100, false},
+		{"explicit output above estimate", `{"max_tokens":200000}`, 400100, false},
 		{"negative cap", `{"max_tokens":-1}`, 0, true},
 		{"fractional count", `{"max_tokens":100,"n":1.5}`, 0, true},
 		{"oversized count", `{"max_tokens":100,"n":129}`, 0, true},
@@ -66,9 +72,11 @@ func TestTextBudgetUsesFinalOutgoingLimits(t *testing.T) {
 				PriceData: hosttypes.PriceData{ModelRatio: 1, CompletionRatio: 2, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}}}
 			info.SetEstimatePromptTokens(100)
 			switch tc.name {
-			case "converted responses cap":
+			case "converted responses cap", "unspecified responses output":
 				info.FinalRequestRelayFormat = types.RelayFormatOpenAIResponses
-			case "converted gemini candidates", "duplicate Gemini parent", "Gemini protocol aliases":
+			case "unspecified claude output":
+				info.FinalRequestRelayFormat = types.RelayFormatClaude
+			case "converted gemini candidates", "duplicate Gemini parent", "Gemini protocol aliases", "unspecified gemini output":
 				info.FinalRequestRelayFormat = types.RelayFormatGemini
 			}
 			body, err := PrepareTextBillingBody(ctx, info, strings.NewReader(tc.body))
@@ -88,7 +96,7 @@ func TestTextBudgetUsesFinalOutgoingLimits(t *testing.T) {
 			// A larger channel override must raise the reserve before retry.
 			info.FinalRequestRelayFormat = types.RelayFormatOpenAI
 			require.NoError(t, ReserveTextOutputQuota(ctx, info, []byte(`{"max_tokens":500}`)))
-			assert.Equal(t, 1100, reserved.held)
+			assert.Equal(t, max(tc.want, 1100), reserved.held)
 		})
 	}
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -100,6 +108,12 @@ func TestTextBudgetUsesFinalOutgoingLimits(t *testing.T) {
 	require.NoError(t, ReserveTextOutputQuota(ctx, info, []byte(`{"max_output_tokens":100}`)))
 	assert.Equal(t, 600, info.Billing.GetPreConsumedQuota(), "a discount at c=max must not underfund intermediate usage")
 	assert.Equal(t, 100, info.TieredBillingSnapshot.EstimatedCompletionTokens)
+	info.TieredBillingSnapshot.ExprString = `tier("base", p * 2 + c * 10)`
+	info.TieredBillingSnapshot.ExprHash = billingexpr.ExprHashString(info.TieredBillingSnapshot.ExprString)
+	info.SetEstimatePromptTokens(200000)
+	require.NoError(t, ReserveTextOutputQuota(ctx, info, []byte(`{}`)))
+	assert.Equal(t, 700000, info.Billing.GetPreConsumedQuota(), "large inputs must not be capped by the output estimate")
+	assert.Equal(t, 100000, info.TieredBillingSnapshot.EstimatedCompletionTokens)
 }
 
 func TestTextReservationExpressionBounds(t *testing.T) {

@@ -24,6 +24,10 @@ import (
 // provider's per-candidate output-token ceiling.
 const MaxTextCandidates = 128
 
+// UnspecifiedTextOutputTokens is only a prepaid estimate, not a generation
+// limit. Never inject it into the upstream request or truncate actual usage.
+const UnspecifiedTextOutputTokens = 100_000
+
 // Duplicate limit fields (including duplicate parent objects) are ambiguous:
 // JSON consumers differ in choosing the first or last value. Inspect decoded
 // keys so escaped spellings cannot hide a second effective limit either.
@@ -84,8 +88,8 @@ func PrepareTextBillingBody(c *gin.Context, info *relaycommon.RelayInfo, body io
 }
 
 // ReserveTextOutputQuota inspects the actual outgoing payload, after channel
-// conversion/overrides. Client limits hidden in tool schemas or messages are
-// not limits on generation and must never satisfy this check.
+// conversion/overrides. Missing limits use an estimate without changing the
+// payload. Limits hidden in tool schemas or messages do not reduce the estimate.
 func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []byte) error {
 	price := info.PriceData
 	if !info.EnforceTextBudget || price.GroupRatioInfo.GroupRatio == 0 || price.UsePrice ||
@@ -146,6 +150,9 @@ func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []
 		}
 		maxOutput = max(maxOutput, quantity)
 	}
+	if maxOutput == 0 {
+		maxOutput = UnspecifiedTextOutputTokens
+	}
 	candidates := float64(1)
 	for _, path := range countPaths {
 		value, ambiguous := textOutputLimitField(object, path)
@@ -165,19 +172,11 @@ func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []
 	if maxOutput > maxTokensLimit {
 		return types.NewErrorWithStatusCode(fmt.Errorf("%s", i18n.T(c, i18n.MsgQuotaOutputQuantityInvalid, map[string]any{"Field": "maximum output tokens"})), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	outputPriced := price.CompletionRatio > 0 || price.AudioCompletionRatio > 0
-	if snapshot := info.TieredBillingSnapshot; snapshot != nil {
-		vars := billingexpr.UsedVarsByHash(snapshot.ExprString, snapshot.ExprHash)
-		outputPriced = vars["c"] || vars["ao"] || vars["img_o"]
-	}
-	if outputPriced && maxOutput == 0 {
-		return types.NewErrorWithStatusCode(fmt.Errorf("%s", i18n.T(c, i18n.MsgQuotaOutputLimitRequired)), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-	}
 	multiplier, err := operation_setting.InputPreConsumeMultiplier()
 	if err != nil {
 		return err
 	}
-	// A reservation discount cannot underfund a strict prepaid request. Actual
+	// A reservation discount cannot reduce the prepaid admission estimate. Actual
 	// administrator prices and final settlement are never multiplied here.
 	multiplier = max(1, multiplier)
 	prompt := float64(info.GetEstimatePromptTokens())

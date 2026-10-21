@@ -51,12 +51,16 @@ func TestDoRequestEnforcesBudgetBeforeContactingUpstream(t *testing.T) {
 		name, body string
 		deny       bool
 		status     int
+		quota      int
 	}{
-		{"missing limit", `{}`, false, 400},
-		{"wrong protocol limit", `{"max_output_tokens":100}`, false, 400},
-		{"duplicate passthrough limit", `{"max_tokens":1,"max_tokens":100000}`, false, 400},
-		{"insufficient balance", `{"max_tokens":100}`, true, 403},
-		{"funded request", `{"max_tokens":100}`, false, 200},
+		{"missing limit", `{}`, false, 200, 200100},
+		{"streaming without limit", `{"stream":true}`, false, 200, 200100},
+		{"wrong protocol limit uses estimate", `{"max_output_tokens":100}`, false, 200, 200100},
+		{"duplicate passthrough limit", `{"max_tokens":1,"max_tokens":100000}`, false, 400, 0},
+		{"insufficient balance", `{"max_tokens":100}`, true, 403, 0},
+		{"insufficient balance for unspecified output", `{}`, true, 403, 0},
+		{"funded request", `{"max_tokens":100}`, false, 200, 300},
+		{"explicit output above estimate", `{"max_completion_tokens":200000}`, false, 200, 400100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -75,6 +79,7 @@ func TestDoRequestEnforcesBudgetBeforeContactingUpstream(t *testing.T) {
 				assert.Equal(t, tc.status, apiErr.StatusCode)
 				assert.True(t, types.IsSkipRetryError(apiErr))
 				assert.Zero(t, calls.Load())
+				assert.Zero(t, reservation.held)
 				return
 			}
 			require.NoError(t, err)
@@ -83,7 +88,7 @@ func TestDoRequestEnforcesBudgetBeforeContactingUpstream(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.body, string(body))
 			assert.EqualValues(t, 1, calls.Load())
-			assert.GreaterOrEqual(t, reservation.held, 300)
+			assert.Equal(t, tc.quota, reservation.held)
 		})
 	}
 }
