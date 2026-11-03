@@ -391,12 +391,12 @@ func updatePricing() {
 				usageModel = target.Declared
 			}
 		}
-		if ok && plugin != nil {
+		if ok && plugin != nil && plugin.Meta.UsesTaskDriver() {
 			usageSchema, usageExamples := plugin.Meta.UsageForModel(usageModel)
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
 		}
-		providers := pluginGeneration.PluginsByModel(model)
+		providers := pluginGeneration.TaskPluginsByModel(model)
 		hasProviderOverride := false
 		for _, provider := range providers {
 			if _, configured := billing_setting.GetPluginBillingExpr(provider.Meta.Key, model); configured {

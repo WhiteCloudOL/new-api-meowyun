@@ -381,3 +381,32 @@ func TestModelPricingIssuesFollowPluginChanges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, issues)
 }
+
+func TestSpeechPluginUsesOrdinaryModelPricing(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	const pluginKey = "speech-pricing-probe"
+	const modelName = "speech-pricing-model"
+	_, err := jsplugin.DefaultRegistry.Register(`
+export const meta = {
+  apiVersion: 1, key: "speech-pricing-probe", name: "Speech Pricing Probe",
+  version: "1.0.0", author: {name: "Test"}, models: ["speech-pricing-model"],
+  fetchMode: "per_task", protocols: ["openai_audio_speech"],
+};
+export const protocols = {
+  openai_audio_speech: {decodeRequest() {}, buildRequest() {}, parseResponse() {}},
+};`, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(pluginKey) })
+
+	for _, expr := range []string{`tier("characters", p * 100)`, `tier("call", fixed(0.0001))`} {
+		require.NoError(t, ValidateModelPricing(modelName, PricingValues{
+			"billing_setting.billing_mode": "tiered_expr",
+			"billing_setting.billing_expr": expr,
+		}))
+	}
+	snapshot, err := GetModelPricingSnapshot([]string{modelName})
+	require.NoError(t, err)
+	require.Len(t, snapshot.Entries, 1)
+	assert.Empty(t, snapshot.Entries[0].UsageSchema)
+	assert.Empty(t, snapshot.Entries[0].PluginVariants)
+}

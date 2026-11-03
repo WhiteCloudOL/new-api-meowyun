@@ -416,6 +416,19 @@ func (p ProtocolRequestContext) withProtocol(value map[string]any) map[string]an
 // concrete wire/state machine for an otherwise valid manifest endpoint.
 func SupportsHostProtocol(protocol string) bool { _, ok := HostProtocol(protocol); return ok }
 
+// UsesTaskDriver reports whether the manifest has task submission hooks.
+func (meta Meta) UsesTaskDriver() bool {
+	if len(meta.Protocols) == 0 || len(meta.Routes) > 0 {
+		return true
+	}
+	for _, claim := range meta.Protocols {
+		if definition, _ := HostProtocol(claim.Name); definition.UsesTaskDriver {
+			return true
+		}
+	}
+	return false
+}
+
 // RoutingGeneration is an immutable, request-pinnable view of all effective
 // plugins and their deterministic routing indexes.
 type RoutingGeneration struct {
@@ -528,6 +541,13 @@ func (g *RoutingGeneration) PluginsByModel(model string) []*LoadedPlugin {
 		return nil
 	}
 	return slices.Clone(g.modelPlugins[model])
+}
+
+// TaskPluginsByModel returns the providers that use task usage expressions.
+func (g *RoutingGeneration) TaskPluginsByModel(model string) []*LoadedPlugin {
+	return slices.DeleteFunc(g.PluginsByModel(model), func(plugin *LoadedPlugin) bool {
+		return !plugin.Meta.UsesTaskDriver()
+	})
 }
 
 // SharedModel reports whether multiple plugins declare a model without copying

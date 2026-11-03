@@ -271,14 +271,14 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 			ModelPricingDescription: ModelPricingDescription{Effective: effectiveModelPricing(values, name)}}
 		entry.CacheWriteMode = ResolveCacheWriteMode(name, configured)
 		entry.BillingDetails = ResolveLegacyBillingDetails(name, entry.Effective, configured)
-		if plugin, ok := generation.GetByModel(name); ok {
-			entry.UsageSchema, _ = plugin.Meta.UsageForModel(name)
+		plugins := generation.TaskPluginsByModel(name)
+		if len(plugins) > 0 {
+			entry.UsageSchema, _ = plugins[0].Meta.UsageForModel(name)
 		} else if target, ok := ResolveTaskModelAlias(generation, name); ok {
-			if plugin, ok := generation.Get(target.PluginKey); ok {
+			if plugin, ok := generation.Get(target.PluginKey); ok && plugin.Meta.UsesTaskDriver() {
 				entry.UsageSchema, _ = plugin.Meta.UsageForModel(target.Declared)
 			}
 		}
-		plugins := generation.PluginsByModel(name)
 		configuredVariants, _ := configured[billing_setting.PluginBillingExprOption].(map[string]any)
 		if len(plugins) > 0 || len(configuredVariants) > 0 {
 			keys := make(map[string]bool, len(plugins)+len(configuredVariants))
@@ -292,7 +292,7 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 				configuredValue, overridden := configuredVariants[key]
 				configuredExpr, _ := configuredValue.(string)
 				plugin, exists := generation.Get(key)
-				if !exists || !slices.Contains(plugin.Meta.Models, name) {
+				if !exists || !plugin.Meta.UsesTaskDriver() || !slices.Contains(plugin.Meta.Models, name) {
 					variant := ModelPricingPluginVariant{
 						PluginKey: key, PluginName: key, Configured: configuredExpr,
 						UsageSchema: map[string]jsplugin.UsageFieldSchema{}, Stale: true,
@@ -491,7 +491,7 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 				return fmt.Errorf("model %s: plugin %s: billing expression is required", name, key)
 			}
 			plugin, exists := generation.Get(key)
-			declared := exists && slices.Contains(plugin.Meta.Models, name)
+			declared := exists && plugin.Meta.UsesTaskDriver() && slices.Contains(plugin.Meta.Models, name)
 			// An unchanged override stays saveable after its plugin disappears or
 			// stops declaring the model. A sole provider also keeps it after
 			// narrowing its usage profile; relay checks shared models against
@@ -536,7 +536,7 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 			// shared models against each profile, so their prices must follow it.
 			unchanged := previous[key] == expression
 			var err error
-			if plugins := generation.PluginsByModel(name); len(plugins) > 0 {
+			if plugins := generation.TaskPluginsByModel(name); len(plugins) > 0 {
 				for _, plugin := range plugins {
 					_, overridden := variants[plugin.Meta.Key]
 					_, wasOverridden := previousVariants[plugin.Meta.Key]
@@ -549,7 +549,7 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 					}
 				}
 			} else if target, resolved := ResolveTaskModelAlias(generation, name); resolved {
-				if plugin, ok := generation.Get(target.PluginKey); ok {
+				if plugin, ok := generation.Get(target.PluginKey); ok && plugin.Meta.UsesTaskDriver() {
 					if !unchanged || generation.SharedModel(target.Declared) {
 						schema, _ := plugin.Meta.UsageForModel(target.Declared)
 						err = billing_setting.SmokeTestTaskExpr(expression, schema)

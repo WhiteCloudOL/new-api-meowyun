@@ -349,11 +349,7 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 	}
 	engine.key = meta.Key
 	engine.version = meta.Version
-	usesTaskDriver := len(meta.Protocols) == 0 || len(meta.Routes) > 0
-	for _, claim := range meta.Protocols {
-		definition, _ := HostProtocol(claim.Name)
-		usesTaskDriver = usesTaskDriver || definition.UsesTaskDriver
-	}
+	usesTaskDriver := meta.UsesTaskDriver()
 	requiredHooks := make([]string, 0, 7)
 	if usesTaskDriver {
 		requiredHooks = append(requiredHooks, "buildSubmitRequest", "parseSubmitResponse", "parseTaskResult")
