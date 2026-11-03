@@ -419,6 +419,8 @@ func TestBreezeNativeSpeechUsesItsOwnModelAndTokenAllowlist(t *testing.T) {
 		{"native single", "application/x-www-form-urlencoded", "/v1/audio/speech", "text=A%E6%B1%89&instruction=whisper", "breeze-tts", "A汉", 1, 204},
 		{"native batch", "application/x-www-form-urlencoded", "/v1/audio/speech/batch", "texts=%5B%22A%22%2C%22%E6%B1%89%22%5D", "breeze-tts", "A汉", 1, 204},
 		{"different native model", "application/x-www-form-urlencoded", "/v1/audio/speech", "model=tts-1&text=A", "", "", 1, 400},
+		{"recognizes native JSON text", "application/json", "/v1/audio/speech", `{"text":"A汉","instruction":"whisper"}`, "breeze-tts", "A汉", 1, 204},
+		{"leaves ambiguous OpenAI JSON", "application/json", "/v1/audio/speech", `{"input":"A"}`, "", "A", 1, 204},
 		{"explicit OpenAI model", "application/json", "/v1/audio/speech", `{"model":"tts-1","input":"A"}`, "tts-1", "A", 1, 204},
 		{"native denied", "application/x-www-form-urlencoded", "/v1/audio/speech", "text=A", "", "", 0, 403},
 	} {

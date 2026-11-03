@@ -31,7 +31,8 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 	media, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	form := media == "multipart/form-data" || media == "application/x-www-form-urlencoded"
 
-	if !form && !batch {
+	jsonBody := media == "application/json" || strings.HasSuffix(media, "+json")
+	if !form && !batch && !jsonBody {
 		c.Next()
 		return
 	}
@@ -96,6 +97,17 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 			if err := common.Unmarshal(raw, &body); err != nil || body == nil {
 				return fmt.Errorf("invalid speech JSON object")
 			}
+		}
+		if !form && !batch {
+			// A native text field is unambiguous. Leave OpenAI requests and
+			// explicitly named models on their existing routing path.
+			text, native := body["text"].(string)
+			if !native || body["input"] != nil || body["model"] != nil && body["model"] != "" {
+				return nil
+			}
+			body["input"] = text
+			body["response_format"] = "pcm"
+			body["breeze_native_pcm"] = true
 		}
 		name, modelIsString := body["model"].(string)
 		if body["model"] != nil && !modelIsString {
