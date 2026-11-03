@@ -15,6 +15,10 @@ func TestHostProtocolRegistryDrivesProtocolRoutesOnce(t *testing.T) {
 
 	expected := []string{
 		"POST /v1/audio/speech",
+		"POST /v1/audio/speech/batch",
+		"GET /health",
+		"GET /v1/model",
+		"GET /v1/queue",
 		"POST /v1/responses",
 		"GET /v1/responses/:response_id",
 		"POST /v1/videos",

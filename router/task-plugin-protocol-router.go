@@ -11,6 +11,10 @@ import (
 )
 
 func SetTaskPluginProtocolRouter(router *gin.Engine) {
+	for _, path := range []string{"/health", "/v1/model", "/v1/queue"} {
+		router.GET(path, middleware.RouteTag("relay"), middleware.TokenAuth(), middleware.ModelRequestRateLimit(),
+			middleware.SelectBreezeMetadataModel, middleware.Distribute(), controller.BreezeSpeechMetadata)
+	}
 	for _, protocol := range pluginruntime.HostProtocols() {
 		for _, operation := range protocol.Operations {
 			for _, method := range operation.Methods {
@@ -48,10 +52,10 @@ func taskPluginProtocolHandlers(protocol, operation string) ([]gin.HandlerFunc, 
 			middleware.RouteTaskPluginEndpoint(), middleware.TaskPluginEndpointOnly(middleware.ModelRequestRateLimit()), middleware.PrepareTaskPluginEndpoint(), middleware.Distribute(),
 			func(c *gin.Context) { controller.RelayTaskPluginEndpoint(c, controller.RelayTask) },
 		}, nil
-	case "openai_audio_speech.create":
+	case "openai_audio_speech.create", "openai_audio_speech.batch":
 		return []gin.HandlerFunc{
 			middleware.RouteTag("relay"), middleware.SystemPerformanceCheck(), middleware.TokenAuth(),
-			middleware.ModelRequestRateLimit(), middleware.PinTaskPluginEndpoint(), middleware.PrepareTaskPluginEndpoint(), middleware.Distribute(),
+			middleware.ModelRequestRateLimit(), middleware.NormalizeBreezeSpeech, middleware.PinTaskPluginEndpoint(), middleware.PrepareTaskPluginEndpoint(), middleware.Distribute(),
 			func(c *gin.Context) { controller.Relay(c, types.RelayFormatOpenAIAudio) },
 		}, nil
 	case "openai_responses.retrieve":

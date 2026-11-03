@@ -24,7 +24,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const BreezeSpeechModel = "breeze-tts"
+const (
+	BreezeSpeechModel       = "breeze-tts"
+	BreezeBatchPath         = "/v1/audio/speech/batch"
+	BreezeMaxReferenceBytes = 10 << 20
+)
 
 type ThinkingContentInfo struct {
 	IsFirstThinkingContent  bool

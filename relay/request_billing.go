@@ -45,7 +45,7 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 				}
 			}
 		}
-		characterSpeech = meta.TokenType == types.TokenTypeTextNumber
+		characterSpeech = breezeCharacters > 0 || meta.TokenType == types.TokenTypeTextNumber
 		if characterSpeech {
 			info.ForcePreConsume = true
 		}

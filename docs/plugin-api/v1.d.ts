@@ -86,8 +86,10 @@ export declare const protocols: {
 };
 export interface AudioDriverContext {requestBody: unknown; model: string; upstreamModel: string; baseUrl: string; apiKey?: string; authHeader: string; config: Readonly<Record<string, JSONValue>>}
 export type AudioRequestDescriptor = Pick<RequestDescriptor, "url" | "method" | "headers" | "body"> & {
-  bodyEncoding?: "json" | "form";
-  responseType?: "json" | "pcm";
+  bodyEncoding?: "json" | "form" | "multipart";
+  responseType?: "json" | "pcm" | "pcm_batch" | "pcm_stream";
+  referenceAudio?: string;
+  referenceFilename?: string;
 };
 export interface AudioResponseContext {statusCode: number; headers: Readonly<Record<string, readonly string[]>>; body: unknown; requestBody?: unknown; inputCharacters: number; config: Readonly<Record<string, JSONValue>>}
 export interface AudioResponseDescriptor {audio?: {data?: string; url?: string}; format?: "mp3" | "wav" | "pcm" | "opus"; requestId?: string; allowedHostSuffixes?: readonly string[]; maxBytes?: number; timeoutSeconds?: number; usage: {characters?: number; inputTextTokens?: number; outputAudioTokens?: number; totalTokens?: number}}

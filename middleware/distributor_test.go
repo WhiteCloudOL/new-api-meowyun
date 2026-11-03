@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/gin-gonic/gin"
@@ -399,4 +400,54 @@ func TestSharedEndpointRebindsToBoundNewAPIExtension(t *testing.T) {
 	require.Nil(t, SetupContextForSelectedChannel(c, channel, "task-model"))
 	assert.Equal(t, "alpha", c.GetString("task_plugin_key"), "the first bound candidate executes regardless of the earlier pin")
 	assert.Equal(t, "alpha", c.MustGet(jsplugin.ContextKeyPinnedEndpoint).(jsplugin.PinnedEndpoint).Plugin.Meta.Key)
+}
+
+func TestBreezeNativeSpeechUsesItsOwnModelAndTokenAllowlist(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	source, err := plugins.Source("breeze-tts")
+	require.NoError(t, err)
+	if _, registered := jsplugin.DefaultRegistry.Generation().Get("breeze-tts"); !registered {
+		_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister("breeze-tts")) })
+	}
+
+	for _, tc := range []struct {
+		name, contentType, path, body, model, input string
+		allowed, status                             int
+	}{
+		{"native single", "application/x-www-form-urlencoded", "/v1/audio/speech", "text=A%E6%B1%89&instruction=whisper", "breeze-tts", "A汉", 1, 204},
+		{"native batch", "application/x-www-form-urlencoded", "/v1/audio/speech/batch", "texts=%5B%22A%22%2C%22%E6%B1%89%22%5D", "breeze-tts", "A汉", 1, 204},
+		{"different native model", "application/x-www-form-urlencoded", "/v1/audio/speech", "model=tts-1&text=A", "", "", 1, 400},
+		{"explicit OpenAI model", "application/json", "/v1/audio/speech", `{"model":"tts-1","input":"A"}`, "tts-1", "A", 1, 204},
+		{"native denied", "application/x-www-form-urlencoded", "/v1/audio/speech", "text=A", "", "", 0, 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := gin.New()
+			engine.POST(tc.path, func(c *gin.Context) {
+				defer common.CleanupBodyStorage(c)
+				common.SetContextKey(c, constant.ContextKeyTokenModelLimitEnabled, true)
+				common.SetContextKey(c, constant.ContextKeyTokenModelLimit, map[string]bool{"breeze-tts": tc.allowed == 1})
+				c.Next()
+			}, NormalizeBreezeSpeech, func(c *gin.Context) {
+				if tc.allowed == 0 {
+					Distribute()(c)
+					return
+				}
+				var body struct {
+					Model string `json:"model"`
+					Input string `json:"input"`
+				}
+				require.NoError(t, common.UnmarshalBodyReusable(c, &body))
+				assert.Equal(t, tc.model, body.Model)
+				assert.Equal(t, tc.input, body.Input)
+				c.Status(http.StatusNoContent)
+			})
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", tc.contentType)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+			assert.Equal(t, tc.status, w.Code, w.Body.String())
+		})
+	}
 }

@@ -9,13 +9,16 @@ import (
 	"io"
 	"math"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -33,12 +36,14 @@ const (
 )
 
 type audioRequestDescriptor struct {
-	URL          string            `json:"url"`
-	Method       string            `json:"method"`
-	Headers      map[string]string `json:"headers"`
-	Body         any               `json:"body"`
-	BodyEncoding string            `json:"bodyEncoding"`
-	ResponseType string            `json:"responseType"`
+	URL               string            `json:"url"`
+	Method            string            `json:"method"`
+	Headers           map[string]string `json:"headers"`
+	Body              any               `json:"body"`
+	BodyEncoding      string            `json:"bodyEncoding"`
+	ResponseType      string            `json:"responseType"`
+	ReferenceAudio    string            `json:"referenceAudio"`
+	ReferenceFilename string            `json:"referenceFilename"`
 }
 
 type audioResponseDescriptor struct {
@@ -64,11 +69,13 @@ type audioResponseDescriptor struct {
 // response limits, usage normalization, and billing handoff.
 type AudioAdaptor struct {
 	openai.Adaptor
-	plugin      *pluginruntime.LoadedPlugin
-	request     *audioRequestDescriptor
-	format      string
-	requestBody any
-	cancel      context.CancelFunc
+	plugin       *pluginruntime.LoadedPlugin
+	request      *audioRequestDescriptor
+	format       string
+	requestBody  any
+	cancel       context.CancelFunc
+	contentType  string
+	segmentCount int
 }
 
 func NewAudio(plugin *pluginruntime.LoadedPlugin) *AudioAdaptor {
@@ -104,8 +111,8 @@ func (a *AudioAdaptor) SetupRequestHeader(c *gin.Context, headers *http.Header, 
 		}
 		headers.Set(name, value)
 	}
-	if a.request.BodyEncoding == "form" {
-		headers.Set("Content-Type", "application/x-www-form-urlencoded")
+	if a.contentType != "" {
+		headers.Set("Content-Type", a.contentType)
 	}
 	return nil
 }
@@ -128,7 +135,7 @@ func (a *AudioAdaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.Rel
 		protocolContext.JSValue(),
 	)
 	if err != nil {
-		return nil, err
+		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	decoded, ok := decodedValue.(map[string]any)
 	if !ok || decoded["kind"] != "relay" || decoded["model"] != pinned.Model {
@@ -161,17 +168,30 @@ func (a *AudioAdaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.Rel
 	if _, err = a.GetRequestURL(info); err != nil {
 		return nil, err
 	}
-	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" && descriptor.ResponseType != "pcm" {
+	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" && descriptor.ResponseType != "pcm" && descriptor.ResponseType != "pcm_batch" && descriptor.ResponseType != "pcm_stream" {
 		return nil, fmt.Errorf("plugin returned unsupported speech response type")
 	}
-	if descriptor.BodyEncoding == "form" {
+	if descriptor.BodyEncoding == "form" || descriptor.BodyEncoding == "multipart" {
 		fields, ok := descriptor.Body.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("plugin speech form must be an object")
 		}
-		if pinned.Model == relaycommon.BreezeSpeechModel && fields["text"] != audioRequest.Input {
-			return nil, fmt.Errorf("BreezeTTS upstream text must match the billed input")
+		if pinned.Model == relaycommon.BreezeSpeechModel {
+			billedText, _ := fields["text"].(string)
+			if pinned.Operation.Name == "batch" {
+				var texts []string
+				raw, _ := fields["texts"].(string)
+				if common.UnmarshalJsonStr(raw, &texts) != nil || len(texts) == 0 || len(texts) > 128 || descriptor.ResponseType != "pcm_batch" {
+					return nil, fmt.Errorf("invalid BreezeTTS batch")
+				}
+				billedText = strings.Join(texts, "")
+				a.segmentCount = len(texts)
+			}
+			if billedText != audioRequest.Input {
+				return nil, fmt.Errorf("BreezeTTS upstream text must match the billed input")
+			}
 		}
+
 		form := make(url.Values, len(fields))
 		for key, value := range fields {
 			text, ok := value.(string)
@@ -180,7 +200,43 @@ func (a *AudioAdaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.Rel
 			}
 			form.Set(key, text)
 		}
-		return strings.NewReader(form.Encode()), nil
+		if descriptor.BodyEncoding == "form" {
+			a.contentType = "application/x-www-form-urlencoded"
+			return strings.NewReader(form.Encode()), nil
+		}
+
+		if len(descriptor.ReferenceAudio) > base64.StdEncoding.EncodedLen(relaycommon.BreezeMaxReferenceBytes) {
+			return nil, fmt.Errorf("reference audio exceeds 10 MiB")
+		}
+		audio, err := base64.StdEncoding.DecodeString(descriptor.ReferenceAudio)
+		if err != nil || len(audio) == 0 || len(audio) > relaycommon.BreezeMaxReferenceBytes {
+			return nil, fmt.Errorf("invalid reference audio")
+		}
+		ext := strings.ToLower(filepath.Ext(descriptor.ReferenceFilename))
+		switch ext {
+		case ".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".opus", ".webm", ".aiff":
+		default:
+			ext = ".wav"
+		}
+		var encoded bytes.Buffer
+		writer := multipart.NewWriter(&encoded)
+		for key, values := range form {
+			if err := writer.WriteField(key, values[0]); err != nil {
+				return nil, err
+			}
+		}
+		part, err := writer.CreateFormFile("ref_audio", "reference"+ext)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := part.Write(audio); err != nil {
+			return nil, err
+		}
+		if err := writer.Close(); err != nil {
+			return nil, err
+		}
+		a.contentType = writer.FormDataContentType()
+		return &encoded, nil
 	}
 	if descriptor.BodyEncoding != "" && descriptor.BodyEncoding != "json" {
 		return nil, fmt.Errorf("plugin returned unsupported speech body encoding")
@@ -196,7 +252,7 @@ func (a *AudioAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bo
 	originalMethod := c.Request.Method
 	c.Request.Method = http.MethodPost
 	defer func() { c.Request.Method = originalMethod }()
-	if a.request.ResponseType == "pcm" {
+	if a.request.ResponseType == "pcm" || a.request.ResponseType == "pcm_batch" || a.request.ResponseType == "pcm_stream" {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Minute)
 		a.cancel = cancel
 		return channel.DoApiRequestWithContext(ctx, a, c, info, body)
@@ -206,17 +262,23 @@ func (a *AudioAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bo
 
 func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (any, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
-	rawPCM := a.request != nil && a.request.ResponseType == "pcm"
+	batch := a.request != nil && a.request.ResponseType == "pcm_batch"
+	streamPCM := a.request != nil && a.request.ResponseType == "pcm_stream"
+	rawPCM := a.request != nil && (a.request.ResponseType == "pcm" || batch || streamPCM)
 	limit := maxPluginAudioResponseBytes
 	if rawPCM {
 		limit = defaultPluginAudioBytes
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
-	if err != nil || len(body) > limit {
-		if err == nil {
-			err = fmt.Errorf("plugin audio response exceeds size limit")
+	var body []byte
+	var err error
+	if !streamPCM {
+		body, err = io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+		if err != nil || len(body) > limit {
+			if err == nil {
+				err = fmt.Errorf("plugin audio response exceeds size limit")
+			}
+			return nil, pluginAudioResponseError(err)
 		}
-		return nil, pluginAudioResponseError(err)
 	}
 	var responseBody any
 	if !rawPCM {
@@ -254,9 +316,66 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 	if format == "" {
 		format = strings.ToLower(strings.TrimSpace(a.format))
 	}
+	if streamPCM {
+		if format != "pcm" {
+			return nil, pluginAudioResponseError(fmt.Errorf("streaming audio requires PCM output"))
+		}
+		var first [2]byte
+		if _, err := pluginPCMResponse(resp.Header, first[:], format); err != nil {
+			return nil, pluginAudioResponseError(err)
+		}
+		if _, err := io.ReadFull(resp.Body, first[:]); err != nil {
+			return nil, pluginAudioResponseError(err)
+		}
+		c.Header("Content-Type", "audio/pcm")
+		c.Header("Cache-Control", "no-store")
+		for _, name := range []string{"X-Sample-Rate", "X-Sample-Format", "X-Queue-Wait-Ms"} {
+			c.Header(name, resp.Header.Get(name))
+		}
+		reader := io.LimitReader(io.MultiReader(bytes.NewReader(first[:]), resp.Body), int64(limit))
+		buffer := make([]byte, 16<<10)
+		for {
+			n, err := reader.Read(buffer)
+			if n > 0 {
+				if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
+					break
+				}
+				c.Writer.Flush()
+			}
+			if err != nil {
+				if err != io.EOF {
+					logger.LogWarn(c, "Upstream PCM stream ended after audio delivery")
+				}
+				break
+			}
+		}
+		return usage, nil
+	}
+
 	var audio []byte
 	if rawPCM {
-		audio, err = pluginPCMResponse(resp.Header, body, format)
+		pcmHeaders := resp.Header
+		if batch {
+			mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+			segments := strings.Split(resp.Header.Get("X-Segment-Bytes"), ",")
+			if mediaType != "application/octet-stream" || len(segments) != a.segmentCount || a.segmentCount == 0 {
+				return nil, pluginAudioResponseError(fmt.Errorf("upstream returned invalid PCM batch"))
+			}
+			remaining := len(body)
+			for _, segment := range segments {
+				size, err := strconv.Atoi(segment)
+				if err != nil || size < 0 || size > remaining || size%2 != 0 {
+					return nil, pluginAudioResponseError(fmt.Errorf("upstream returned invalid PCM segment size"))
+				}
+				remaining -= size
+			}
+			if remaining != 0 {
+				return nil, pluginAudioResponseError(fmt.Errorf("upstream PCM segment sizes do not match response"))
+			}
+			pcmHeaders = resp.Header.Clone()
+			pcmHeaders.Set("Content-Type", "audio/pcm")
+		}
+		audio, err = pluginPCMResponse(pcmHeaders, body, format)
 	} else {
 		audio, err = a.readAudio(c, parsed)
 	}
@@ -269,9 +388,14 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 	if !ok {
 		return nil, pluginAudioResponseError(fmt.Errorf("plugin returned unsupported audio format %q", format))
 	}
+	if batch {
+		contentType = "application/octet-stream"
+		c.Header("X-Segment-Bytes", resp.Header.Get("X-Segment-Bytes"))
+	}
 	c.Header("Content-Type", contentType)
 	c.Header("Cache-Control", "no-store")
 	if rawPCM {
+		c.Header("X-Queue-Wait-Ms", resp.Header.Get("X-Queue-Wait-Ms"))
 		c.Header("X-Sample-Rate", resp.Header.Get("X-Sample-Rate"))
 		c.Header("X-Sample-Format", "s16le")
 	}
