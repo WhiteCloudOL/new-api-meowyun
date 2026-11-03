@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -321,12 +322,16 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 }
 
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
+	return DoApiRequestWithContext(context.Background(), a, c, info, requestBody)
+}
+
+func DoApiRequestWithContext(ctx context.Context, a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	req, err := http.NewRequestWithContext(ctx, c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}

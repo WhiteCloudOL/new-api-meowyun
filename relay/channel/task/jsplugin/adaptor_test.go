@@ -3034,3 +3034,93 @@ export function buildContentRequest(ctx) {
 		})
 	}
 }
+
+func TestBreezeSpeechAdaptor(t *testing.T) {
+	source, err := plugins.Source("breeze-tts")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.CompilePlugin(source, pluginruntime.Options{})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
+	model := relaycommon.BreezeSpeechModel
+	const input = "A汉&"
+	info := &relaycommon.RelayInfo{
+		OriginModelName: model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: model,
+			ChannelBaseUrl:    "https://speech.example/v1/",
+			ApiKey:            "provider-test-key",
+		},
+	}
+	info.SetEstimatePromptTokens(4)
+	ctx.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{
+		Plugin: plugin, Protocol: "openai_audio_speech", Model: model,
+	})
+	ctx.Set(pluginruntime.ContextKeyProtocolRequest, pluginruntime.ProtocolRequestContext{
+		Model: model,
+		RouteRequestContext: pluginruntime.RouteRequestContext{
+			Body: map[string]any{
+				"kind":  "json",
+				"value": map[string]any{"input": input, "instructions": "Slow & clear"},
+			},
+		},
+	})
+	adaptor := NewAudio(plugin)
+	body, err := adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{Model: model, Input: input})
+	require.NoError(t, err)
+	encoded, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.Equal(t, "instruction=Slow+%26+clear&text=A%E6%B1%89%26", string(encoded))
+	target, err := adaptor.GetRequestURL(info)
+	require.NoError(t, err)
+	assert.Equal(t, "https://speech.example/v1/audio/speech", target)
+	headers := http.Header{}
+	require.NoError(t, adaptor.SetupRequestHeader(ctx, &headers, info))
+	assert.Equal(t, "application/x-www-form-urlencoded", headers.Get("Content-Type"))
+	assert.Equal(t, "Bearer provider-test-key", headers.Get("Authorization"))
+	_, err = adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{Model: model, Input: "different"})
+	require.ErrorContains(t, err, "must match the billed input")
+
+	for _, tc := range []struct {
+		name         string
+		format       string
+		sampleFormat string
+		data         string
+		wantError    bool
+	}{
+		{name: "wav", format: "wav", sampleFormat: "s16le", data: "\x00\x80"},
+		{name: "pcm", format: "pcm", sampleFormat: "s16le", data: "\x00\x80"},
+		{name: "unsupported sample format", format: "wav", sampleFormat: "f32le", data: "\x00\x80", wantError: true},
+		{name: "partial sample", format: "pcm", sampleFormat: "s16le", data: "\x80", wantError: true},
+		{name: "empty upstream body", format: "wav", sampleFormat: "s16le", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
+			adaptor.requestBody = map[string]any{"format": tc.format}
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.data))}
+			resp.Header.Set("Content-Type", "audio/pcm")
+			resp.Header.Set("X-Sample-Rate", "24000")
+			resp.Header.Set("X-Sample-Format", tc.sampleFormat)
+			usage, apiErr := adaptor.DoResponse(ctx, resp, info)
+			if tc.wantError {
+				require.NotNil(t, apiErr)
+				assert.Empty(t, recorder.Body.String())
+				return
+			}
+			require.Nil(t, apiErr)
+			assert.Equal(t, 4, usage.(*dto.Usage).PromptTokens)
+			assert.Equal(t, "audio/"+tc.format, recorder.Header().Get("Content-Type"))
+			if tc.format == "pcm" {
+				assert.Equal(t, tc.data, recorder.Body.String())
+			} else {
+				require.Len(t, recorder.Body.Bytes(), 46)
+				assert.Equal(t, "RIFF", recorder.Body.String()[:4])
+				assert.Equal(t, tc.data, recorder.Body.String()[44:])
+			}
+		})
+	}
+}

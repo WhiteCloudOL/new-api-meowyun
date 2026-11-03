@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -25,12 +27,24 @@ import (
 func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	meta := &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
 	characterSpeech := false
+	breezeCharacters := 0
 	switch request := info.Request.(type) {
 	case *dto.GeneralOpenAIRequest, *dto.OpenAIResponsesRequest, *dto.ClaudeRequest, *dto.GeminiChatRequest:
 		info.EnforceTextBudget = true
 		info.ForcePreConsume = true
 	case *dto.AudioRequest:
 		meta = request.GetTokenCountMeta()
+		if info.OriginModelName == relaycommon.BreezeSpeechModel {
+			if len(request.Input) > 4096*utf8.UTFMax || strings.TrimSpace(request.Input) == "" || utf8.RuneCountInString(request.Input) > 4096 {
+				return types.NewErrorWithStatusCode(errors.New("BreezeTTS input must contain 1 to 4096 characters"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+			for _, char := range request.Input {
+				breezeCharacters++
+				if unicode.Is(unicode.Han, char) {
+					breezeCharacters++
+				}
+			}
+		}
 		characterSpeech = meta.TokenType == types.TokenTypeTextNumber
 		if characterSpeech {
 			info.ForcePreConsume = true
@@ -64,7 +78,9 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 
 	var tokens int
 	var err error
-	if info.EnforceTextBudget || characterSpeech {
+	if breezeCharacters > 0 {
+		tokens = breezeCharacters
+	} else if info.EnforceTextBudget || characterSpeech {
 		// Character-counted speech must fund its actual input independently of
 		// optional token estimation. It never reserves text-generation output.
 		tokens, err = service.CountRequestToken(c, meta, info)

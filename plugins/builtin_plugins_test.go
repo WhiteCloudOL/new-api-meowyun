@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var expectedKeys = []string{"alibaba", "alibaba-tts", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
+var expectedKeys = []string{"alibaba", "alibaba-tts", "breeze-tts", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
 var expectedTaskKeys = []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
 
 func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing.T) {

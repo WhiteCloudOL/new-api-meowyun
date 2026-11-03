@@ -24,6 +24,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const BreezeSpeechModel = "breeze-tts"
+
 type ThinkingContentInfo struct {
 	IsFirstThinkingContent  bool
 	SendLastThinkingContent bool

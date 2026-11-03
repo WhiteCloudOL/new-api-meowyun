@@ -85,7 +85,7 @@ export declare const protocols: {
   openai_image?: {decodeRequest(ctx: ProtocolDecodeContext): SubmitIntent; render(ctx: unknown, task: TaskView): {created?: number; data: readonly ImageResponseEntry[]} & Record<string, unknown>};
 };
 export interface AudioDriverContext {requestBody: unknown; model: string; upstreamModel: string; baseUrl: string; apiKey?: string; authHeader: string; config: Readonly<Record<string, JSONValue>>}
-export type AudioRequestDescriptor = RequestDescriptor & {
+export type AudioRequestDescriptor = Pick<RequestDescriptor, "url" | "method" | "headers" | "body"> & {
   bodyEncoding?: "json" | "form";
   responseType?: "json" | "pcm";
 };

@@ -38,7 +38,9 @@ func AudioHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	adaptor := GetAdaptor(info.ApiType)
 	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
 		if pinned, valid := pinnedValue.(pluginruntime.PinnedEndpoint); valid && pinned.Plugin != nil && pinned.Protocol == "openai_audio_speech" {
-			adaptor = jspluginadaptor.NewAudio(pinned.Plugin)
+			audioAdaptor := jspluginadaptor.NewAudio(pinned.Plugin)
+			defer audioAdaptor.Close()
+			adaptor = audioAdaptor
 		}
 	}
 	if adaptor == nil {
