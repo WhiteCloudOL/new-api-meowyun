@@ -23,6 +23,7 @@ import (
 	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func modelPriceNotConfiguredError(c *gin.Context, modelName string, userId int) error {
@@ -420,13 +421,11 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 		return hosttypes.PriceData{}, err
 	}
 
-	freeModel := false
-	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
-		if groupRatioInfo.GroupRatio == 0 {
-			preConsumedQuota = 0
-			freeModel = true
-		}
-	}
+	freeModelPreConsume := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+	skipPreConsumeForZeroCost := !freeModelPreConsume && rawCost == 0 &&
+		!mayIncurToolSurcharge(info, gjson.ParseBytes(requestInput.Body)) &&
+		billingexpr.IsZeroCostByHash(exprStr, exprHash, requestInput)
+	freeModel := !freeModelPreConsume && (groupRatioInfo.GroupRatio == 0 || skipPreConsumeForZeroCost)
 
 	snapshot := &billingexpr.BillingSnapshot{
 		EstimatedImageCount:       trace.ImageCount,
@@ -443,6 +442,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 		EstimatedTier:             trace.MatchedTier,
 		EstimatedBillingUnit:      trace.BillingUnit,
 		EstimatedFixedPrice:       trace.FixedPrice,
+		SkipPreConsumeForZeroCost: skipPreConsumeForZeroCost,
 		QuotaPerUnit:              common.QuotaPerUnit,
 		ExprVersion:               billingexpr.ExprVersion(exprStr),
 	}

@@ -31,15 +31,73 @@ func ReservationUpperBound(expression, hash string, prompt, output float64, requ
 	return bound.high, nil
 }
 
-func reservationDependsOnUsage(node ast.Node) bool {
+// IsZeroCostByHash proves that a pricing expression stays zero when actual
+// usage replaces the estimate. Unknown expression shapes keep normal admission.
+func IsZeroCostByHash(expression, hash string, request RequestInput) bool {
+	entry, err := compileEntryFromCacheByHash(expression, hash)
+	return err == nil && isZeroCost(entry.reservationTree, request)
+}
+
+func isZeroCost(node ast.Node, request RequestInput) bool {
+	switch n := node.(type) {
+	case *ast.IntegerNode:
+		return n.Value == 0
+	case *ast.FloatNode:
+		return n.Value == 0
+	case *ast.UnaryNode:
+		if n.Operator == "+" || n.Operator == "-" {
+			return isZeroCost(n.Node, request)
+		}
+	case *ast.CallNode:
+		if callee, ok := n.Callee.(*ast.IdentifierNode); ok {
+			switch callee.Value {
+			case "tier":
+				return isZeroCost(n.Arguments[1], request)
+			case "fixed":
+				return isZeroCost(n.Arguments[0], request)
+			}
+		}
+	case *ast.ConditionalNode:
+		if !reservationDependsOnUsage(n.Cond, true) {
+			selected, _, err := RunExprWithRequest("("+n.Cond.String()+") ? 1.0 : 0.0", TokenParams{}, request)
+			if err == nil {
+				if selected == 1 {
+					return isZeroCost(n.Exp1, request)
+				}
+				return isZeroCost(n.Exp2, request)
+			}
+		}
+		return isZeroCost(n.Exp1, request) && isZeroCost(n.Exp2, request)
+	case *ast.BinaryNode:
+		switch n.Operator {
+		case "+", "-":
+			return isZeroCost(n.Left, request) && isZeroCost(n.Right, request)
+		case "*":
+			return isZeroCost(n.Right, request) || isZeroCost(n.Left, request)
+		case "/":
+			if divisor, ok := requestRuleNumber(n.Right); ok && divisor != 0 {
+				return isZeroCost(n.Left, request)
+			}
+		}
+	}
+	if reservationDependsOnUsage(node, true) {
+		return false
+	}
+	cost, _, err := RunExprWithRequest(node.String(), TokenParams{}, request)
+	return err == nil && cost == 0
+}
+
+func reservationDependsOnUsage(node ast.Node, settlement bool) bool {
 	return ast.Find(node, func(node ast.Node) bool {
 		identifier, ok := node.(*ast.IdentifierNode)
 		if !ok {
 			return false
 		}
 		switch identifier.Value {
-		case "p", "c", "cr", "cc", "cc1h", "img", "img_cr", "img_o", "ai", "ao", "u", "hour", "minute", "weekday", "month", "day":
+		case "p", "c", "cr", "cc", "cc1h", "cc12h", "img", "img_cr", "img_o", "ai", "ao", "u", "hour", "minute", "weekday", "month", "day":
 			return true
+		case "len", "image_count":
+			return settlement
 		}
 		return false
 	}) != nil
@@ -55,7 +113,7 @@ func boundReservationCost(node ast.Node, prompt, output float64, request Request
 		switch n.Value {
 		case "len":
 			return reservationRange{prompt, prompt}, nil
-		case "p", "cr", "cc", "cc1h", "img", "img_cr", "ai":
+		case "p", "cr", "cc", "cc1h", "cc12h", "img", "img_cr", "ai":
 			// Category counts are not known until the upstream replies. Allow
 			// each category up to the full locally estimated input quantity.
 			return reservationRange{0, prompt}, nil
@@ -80,7 +138,7 @@ func boundReservationCost(node ast.Node, prompt, output float64, request Request
 			return reservationRange{-value.high, -value.low}, nil
 		}
 	case *ast.ConditionalNode:
-		if !reservationDependsOnUsage(n.Cond) {
+		if !reservationDependsOnUsage(n.Cond, false) {
 			// Request probes and the estimated context length are fixed for
 			// this request. Time probes are deliberately not treated as fixed.
 			condition, _, err := RunExprWithRequest("("+n.Cond.String()+") ? 1.0 : 0.0", TokenParams{Len: prompt}, request)
@@ -181,7 +239,7 @@ func boundReservationCost(node ast.Node, prompt, output float64, request Request
 			return left, nil
 		}
 	}
-	if !reservationDependsOnUsage(node) {
+	if !reservationDependsOnUsage(node, false) {
 		value, _, err := RunExprWithRequest(node.String(), TokenParams{Len: prompt}, request)
 		return reservationRange{value, value}, err
 	}

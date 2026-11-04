@@ -214,7 +214,7 @@ func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
-	if snap == nil {
+	if snap == nil || snap.SkipPreConsumeForZeroCost {
 		return nil
 	}
 	if snap.GroupRatio == 0 {

@@ -81,6 +81,7 @@ type BillingSnapshot struct {
 	ExprVersion               int            `json:"expr_version"`
 	TaskUsageBilling          bool           `json:"task_usage_billing,omitempty"`
 	UsageFacts                map[string]any `json:"usage_facts,omitempty"`
+	SkipPreConsumeForZeroCost bool           `json:"-"`
 }
 
 // TieredResult holds everything needed after running tiered settlement.

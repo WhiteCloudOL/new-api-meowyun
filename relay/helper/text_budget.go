@@ -87,6 +87,28 @@ func PrepareTextBillingBody(c *gin.Context, info *relaycommon.RelayInfo, body io
 	return bytes.NewReader(data), nil
 }
 
+// Tools are priced independently from the model. Keep the funding check for
+// implicit search and for tools added by the client, converter or overrides.
+func mayIncurToolSurcharge(info *relaycommon.RelayInfo, body gjson.Result) bool {
+	if strings.HasSuffix(info.GetBillingModelName(), "search-preview") ||
+		info.ResponsesUsageInfo != nil && len(info.BuiltInTools) > 0 {
+		return true
+	}
+	potential := false
+	body.ForEach(func(key, value gjson.Result) bool {
+		switch strings.ToLower(key.String()) {
+		case "messages":
+			value = value.Get("#.tools")
+		case "tools", "web_search_options", "web_search", "enable_search", "search_parameters":
+		default:
+			return true
+		}
+		potential = value.Type != gjson.Null && value.Type != gjson.False && (!value.IsArray() || len(value.Array()) > 0)
+		return !potential
+	})
+	return potential
+}
+
 // ReserveTextOutputQuota inspects the actual outgoing payload, after channel
 // conversion/overrides. Missing limits use an estimate without changing the
 // payload. Limits hidden in tool schemas or messages do not reduce the estimate.
@@ -171,6 +193,15 @@ func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []
 	maxOutput *= candidates
 	if maxOutput > maxTokensLimit {
 		return types.NewErrorWithStatusCode(fmt.Errorf("%s", i18n.T(c, i18n.MsgQuotaOutputQuantityInvalid, map[string]any{"Field": "maximum output tokens"})), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	if snap := info.TieredBillingSnapshot; snap != nil && snap.SkipPreConsumeForZeroCost {
+		if info.Billing == nil && mayIncurToolSurcharge(info, object) {
+			if apiErr := service.PreConsumeBilling(c, 0, info); apiErr != nil {
+				return apiErr
+			}
+			info.PriceData.FreeModel = false
+		}
+		return nil
 	}
 	multiplier, err := operation_setting.InputPreConsumeMultiplier()
 	if err != nil {
