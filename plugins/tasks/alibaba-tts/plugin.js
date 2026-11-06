@@ -443,6 +443,15 @@ function checkVoiceScope(voice, scope) {
   if (match && match[1] !== scope) fail("voice belongs to another gateway user");
 }
 
+function socketUsage(usage) {
+  if (!isPlainObject(usage)) return undefined;
+  const measured = {};
+  for (const key of ["characters", "input_tokens", "output_tokens"]) {
+    if (usage[key] !== undefined) measured[key] = usage[key];
+  }
+  return measured;
+}
+
 function buildNative(ctx, request, settings) {
   const body = { ...request.body, model: ctx.upstreamModel || ctx.model, input: { ...request.body.input } };
   const input = body.input;
@@ -529,11 +538,11 @@ export const native = {
     if (request.realtime) {
       if (event.type === "response.done" && (!isPlainObject(event.response) || typeof event.response.id !== "string" || !event.response.id || !isPlainObject(event.response.usage))) fail("speech response is missing its usage or response ID");
       return { done: event.type === "session.finished", failed: event.type === "error", audio: event.type === "response.audio.delta",
-        usage: event.type === "response.done" && event.response ? event.response.usage : undefined,
+        usage: event.type === "response.done" && event.response ? socketUsage(event.response.usage) : undefined,
         cumulative: false, usageId: event.type === "response.done" && event.response ? event.response.id : undefined };
     }
     if (!event.header || event.header.task_id !== request.taskId) fail("upstream returned an unexpected speech task_id");
     return { done: event.header.event === "task-finished", failed: event.header.event === "task-failed", cumulative: true,
-      usage: event.payload && event.payload.usage };
+      usage: socketUsage(event.payload && event.payload.usage) };
   },
 };

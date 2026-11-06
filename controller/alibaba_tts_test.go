@@ -327,7 +327,7 @@ func TestAlibabaTTSRealtimeUsageAndZeroBalance(t *testing.T) {
 					case "input_text_buffer.append":
 						for _, frame := range []string{
 							`{"type":"response.audio.delta","delta":"YQ=="}`,
-							`{"type":"response.done","response":{"id":"first","usage":{"characters":2}}}`,
+							`{"type":"response.done","response":{"id":"first","usage":{"characters":2,"input_tokens":2,"output_tokens":3,"input_tokens_details":{"text_tokens":2},"output_tokens_details":{"audio_tokens":3}}}}`,
 							`{"type":"response.done","response":{"id":"first","usage":{"characters":2}}}`,
 							`{"type":"response.done","response":{"id":"second","usage":{"characters":3}}}`,
 						} {

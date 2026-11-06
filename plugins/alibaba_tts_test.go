@@ -140,6 +140,15 @@ func TestAlibabaTTSNativeContracts(t *testing.T) {
 	value, err := plugin.Engine.CallPath(t.Context(), "native", []string{"response"}, map[string]any{"userScope": "u7", "requestBody": map[string]any{"family": "voice", "body": map[string]any{"input": map[string]any{"action": "list_voice"}}}}, map[string]any{"output": map[string]any{"voice_list": []any{map[string]any{"voice_id": "cosyvoice-v3.5-plus-u7-own"}, map[string]any{"voice_id": "cosyvoice-v3.5-plus-u70-other"}}}})
 	require.NoError(t, err)
 	assert.Len(t, value.(map[string]any)["output"].(map[string]any)["voice_list"], 1)
+	value, err = plugin.Engine.CallPath(t.Context(), "native", []string{"socketServer"}, map[string]any{
+		"requestBody": map[string]any{"realtime": true},
+		"event": map[string]any{"type": "response.done", "response": map[string]any{
+			"id": "response-one", "usage": map[string]any{"characters": 22, "input_tokens": 7, "output_tokens": 33, "total_tokens": 40,
+				"input_tokens_details": map[string]any{"text_tokens": 7}, "output_tokens_details": map[string]any{"text_tokens": 0, "audio_tokens": 33}},
+		}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"characters": int64(22), "input_tokens": int64(7), "output_tokens": int64(33)}, value.(map[string]any)["usage"])
 }
 
 func TestAlibabaTTSPluginRejectsUnsupportedRequestShapes(t *testing.T) {
