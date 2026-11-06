@@ -405,6 +405,9 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 		}
 	}
 	for _, route := range meta.Routes {
+		if route.Type == RouteTypeRelay && !slices.ContainsFunc(meta.Protocols, func(claim ProtocolClaim) bool { return claim.Name == route.Protocol }) {
+			return nil, fmt.Errorf("plugin %s relay route requires protocol %s", meta.Key, route.Protocol)
+		}
 		for kind, member := range map[string]string{"decode": route.Decode, "render": route.Render} {
 			if member == "" {
 				continue
@@ -423,6 +426,9 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 		definition, _ := HostProtocol(protocol)
 		required := make(map[string]struct{})
 		allowed := make(map[string]struct{})
+		if protocol == "openai_audio_speech" {
+			allowed["estimateUsage"] = struct{}{}
+		}
 		modeHookUsers := make(map[string][]string)
 		for _, operation := range definition.Operations {
 			for _, hook := range operation.RequiredProtocolMembers {
@@ -1846,6 +1852,32 @@ func validateUsageExampleValue(value any, field UsageFieldSchema) error {
 	return nil
 }
 
+// ValidateUsageFacts applies the schema's units and host limits to measured or
+// estimated facts before they can reach a billing expression.
+func ValidateUsageFacts(meta Meta, facts map[string]any, models ...string) (map[string]any, error) {
+	schema, _ := meta.UsageForModels(models...)
+	validated := make(map[string]any, len(facts))
+	for key := range schema {
+		if _, present := facts[key]; !present {
+			return nil, fmt.Errorf("missing usage fact %s", key)
+		}
+	}
+	for key, value := range facts {
+		field, declared := schema[key]
+		if !declared {
+			return nil, fmt.Errorf("undeclared usage fact %s", key)
+		}
+		if err := validateUsageExampleValue(value, field); err != nil {
+			return nil, fmt.Errorf("usage fact %s: %w", key, err)
+		}
+		if field.Type == "number" {
+			value, _ = usageExampleNumber(value)
+		}
+		validated[key] = value
+	}
+	return validated, nil
+}
+
 func usageExampleNumber(value any) (float64, bool) {
 	switch number := value.(type) {
 	case float64:
@@ -1878,7 +1910,7 @@ func decodeRoutes(value any) ([]Route, error) {
 		}
 		for key := range object {
 			switch key {
-			case "method", "path", "type", "action", "decode", "render", "taskIdParam", "models", "retainResult":
+			case "method", "path", "type", "action", "decode", "render", "taskIdParam", "models", "retainResult", "protocol":
 			default:
 				return nil, fmt.Errorf("plugin meta route %d has unknown field %q", index, key)
 			}
@@ -1906,6 +1938,9 @@ func decodeRoutes(value any) ([]Route, error) {
 			return nil, err
 		}
 		if route.TaskIDParam, err = stringMetaField(object, "taskIdParam"); err != nil {
+			return nil, err
+		}
+		if route.Protocol, err = stringMetaField(object, "protocol"); err != nil {
 			return nil, err
 		}
 		if _, exists := object["models"]; exists {

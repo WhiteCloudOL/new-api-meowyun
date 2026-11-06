@@ -226,15 +226,20 @@ func PrepareTaskPluginRoute() gin.HandlerFunc {
 			// The list names declared models; a case variant or a channel
 			// alias of a listed model is allowed with it.
 			allowed := len(candidate.Route.Models) == 0
+			declaredModel := claimedModel
 			if !allowed {
-				_, _, allowed = model.ResolveTaskPluginModel(pinned.Generation, claimedModel, candidate.Route.Models)
+				_, declaredModel, allowed = model.ResolveTaskPluginModel(pinned.Generation, claimedModel, candidate.Route.Models)
 			}
 			if !allowed {
 				reason, detail = "model_not_allowed", fmt.Sprintf("model %q is not allowed on this route", claimedModel)
 			} else {
+				hookContext := candidateContext.JSValueFor(candidate.Plugin.Meta)
+				if candidate.Route.Type == pluginruntime.RouteTypeRelay {
+					hookContext["model"], hookContext["upstreamModel"] = claimedModel, declaredModel
+				}
 				value, text, callErr := candidate.Plugin.Engine.CallPathWithMemberJSON(
 					c.Request.Context(), 0, candidate.Plugin.Meta.JSONTextMember("requestBody"),
-					"native", []string{candidate.Route.Decode}, candidateContext.JSValueFor(candidate.Plugin.Meta),
+					"native", []string{candidate.Route.Decode}, hookContext,
 				)
 				if callErr != nil {
 					reason, detail = "hook_failed", taskPluginHookDetail(callErr)
@@ -317,6 +322,14 @@ func PrepareTaskPluginRoute() gin.HandlerFunc {
 		}
 
 		owner := accepted[0]
+		if target, ok := resolved["targetModel"].(string); ok && target != "" && common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled) {
+			value, _ := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
+			limits, _ := value.(map[string]bool)
+			if !TokenModelLimitAllows(limits, target) {
+				abortTaskPluginRouteErrorDetail(c, http.StatusForbidden, "token is not allowed to use the target model")
+				return
+			}
+		}
 		pinned.Plugin, pinned.Route, pinned.Candidates = owner.Plugin, owner.Route, accepted
 		c.Set(pluginruntime.ContextKeyPinnedRoute, pinned)
 		c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Generation: pinned.Generation, Plugin: owner.Plugin})
@@ -338,6 +351,35 @@ func PrepareTaskPluginRoute() gin.HandlerFunc {
 			c.Set("task_action", resolvedIntent.action)
 		}
 		c.Set("relay_mode", relayconstant.RelayModeVideoSubmit)
+		if owner.Route.Type == pluginruntime.RouteTypeRelay {
+			request, ok := resolved["request"].(map[string]any)
+			if !ok {
+				abortTaskPluginRouteErrorDetail(c, http.StatusBadRequest, "relay decoder must return a request object")
+				return
+			}
+			request["model"] = resolvedIntent.model
+			encoded, err := common.Marshal(request)
+			if err != nil {
+				abortTaskPluginRouteError(c, http.StatusBadRequest)
+				return
+			}
+			storage, err := common.CreateBodyStorage(encoded)
+			if err != nil {
+				abortTaskPluginRouteError(c, http.StatusInternalServerError)
+				return
+			}
+			if original, exists := c.Get(common.KeyBodyStorage); exists {
+				if closer, ok := original.(io.Closer); ok {
+					_ = closer.Close()
+				}
+			}
+			c.Set(common.KeyBodyStorage, storage)
+			c.Set(common.KeyRequestBody, nil)
+			c.Request.Body = io.NopCloser(storage)
+			c.Request.ContentLength = int64(len(encoded))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("relay_mode", relayconstant.RelayModeAudioSpeech)
+		}
 		if intentErr := applyOriginTaskIntent(c, resolved, owner.Plugin.Meta); intentErr != nil {
 			logger.LogWarn(
 				c,
@@ -389,7 +431,10 @@ func checkTaskPluginRouteIntent(generation *pluginruntime.RoutingGeneration, can
 	}
 	intent.kind = kind
 	switch kind {
-	case string(pluginruntime.RouteTypeSubmit):
+	case string(pluginruntime.RouteTypeSubmit), string(pluginruntime.RouteTypeRelay):
+		if kind == string(pluginruntime.RouteTypeRelay) && candidate.Route.Type != pluginruntime.RouteTypeRelay || kind == string(pluginruntime.RouteTypeSubmit) && candidate.Route.Type == pluginruntime.RouteTypeRelay {
+			return intent, "route_kind_mismatch", taskPluginInvalidRouteResult
+		}
 		modelName, valid := resolved["model"].(string)
 		if !valid || strings.TrimSpace(modelName) == "" {
 			return intent, "invalid_model", "decoded request is missing a model"
@@ -1005,12 +1050,13 @@ func expectedProtocolIntentKind(definition pluginruntime.HostProtocolDefinition)
 
 func buildTaskPluginRouteRequest(c *gin.Context) (pluginruntime.RouteRequestContext, error) {
 	requestContext := pluginruntime.RouteRequestContext{
-		Path:    c.Request.URL.Path,
-		Method:  c.Request.Method,
-		Params:  make(map[string]string, len(c.Params)),
-		Query:   make(map[string][]string),
-		Headers: taskjsplugin.ClientRequestHeaders(c.Request.Header),
-		Body:    map[string]any{"kind": string(pluginruntime.BodyNone)},
+		UserScope: pluginruntime.UserResourceScope(common.GetContextKeyInt(c, constant.ContextKeyUserId)),
+		Path:      c.Request.URL.Path,
+		Method:    c.Request.Method,
+		Params:    make(map[string]string, len(c.Params)),
+		Query:     make(map[string][]string),
+		Headers:   taskjsplugin.ClientRequestHeaders(c.Request.Header),
+		Body:      map[string]any{"kind": string(pluginruntime.BodyNone)},
 	}
 	for _, param := range c.Params {
 		requestContext.Params[param.Key] = param.Value

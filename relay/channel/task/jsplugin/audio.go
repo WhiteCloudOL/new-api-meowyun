@@ -47,6 +47,7 @@ type audioRequestDescriptor struct {
 }
 
 type audioResponseDescriptor struct {
+	Done  bool `json:"done"`
 	Audio struct {
 		Data string `json:"data"`
 		URL  string `json:"url"`
@@ -57,10 +58,11 @@ type audioResponseDescriptor struct {
 	MaxBytes            int      `json:"maxBytes"`
 	TimeoutSeconds      int      `json:"timeoutSeconds"`
 	Usage               struct {
-		Characters        float64 `json:"characters"`
-		InputTextTokens   float64 `json:"inputTextTokens"`
-		OutputAudioTokens float64 `json:"outputAudioTokens"`
-		TotalTokens       float64 `json:"totalTokens"`
+		Facts             map[string]any `json:"facts"`
+		Characters        float64        `json:"characters"`
+		InputTextTokens   float64        `json:"inputTextTokens"`
+		OutputAudioTokens float64        `json:"outputAudioTokens"`
+		TotalTokens       float64        `json:"totalTokens"`
 	} `json:"usage"`
 }
 
@@ -76,6 +78,8 @@ type AudioAdaptor struct {
 	cancel       context.CancelFunc
 	contentType  string
 	segmentCount int
+	nativeRoute  *pluginruntime.Route
+	socket       bool
 }
 
 func NewAudio(plugin *pluginruntime.LoadedPlugin) *AudioAdaptor {
@@ -97,10 +101,38 @@ func (a *AudioAdaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error
 	if err := pluginruntime.ValidateRequestURL(a.request.URL, info.ChannelBaseUrl, a.plugin.Meta.AllowedHosts); err != nil {
 		return "", err
 	}
-	if method := strings.ToUpper(strings.TrimSpace(a.request.Method)); method != "" && method != http.MethodPost {
+	if method := strings.ToUpper(strings.TrimSpace(a.request.Method)); method != "" && method != http.MethodPost && !(a.socket && method == http.MethodGet) {
 		return "", fmt.Errorf("plugin audio request method must be POST")
 	}
 	return a.request.URL, nil
+}
+
+func (a *AudioAdaptor) BuildSocket(c *gin.Context, info *relaycommon.RelayInfo, requestBody any) ([]byte, error) {
+	value, err := a.plugin.Engine.CallPath(c.Request.Context(), "native", []string{"socketRequest"}, map[string]any{
+		"requestBody": requestBody, "model": info.OriginModelName, "upstreamModel": info.UpstreamModelName,
+		"baseUrl": info.ChannelBaseUrl, "authHeader": "Bearer " + info.ApiKey,
+		"userScope": pluginruntime.UserResourceScope(info.UserId),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var descriptor audioRequestDescriptor
+	if err := convert(value, &descriptor); err != nil {
+		return nil, err
+	}
+	a.request, a.socket = &descriptor, true
+	if _, err := a.GetRequestURL(info); err != nil {
+		return nil, err
+	}
+	return common.Marshal(descriptor.Body)
+}
+
+func (a *AudioAdaptor) MeasureUsage(c *gin.Context, info *relaycommon.RelayInfo, value any) (*dto.Usage, error) {
+	var parsed audioResponseDescriptor
+	if err := convert(value, &parsed); err != nil {
+		return nil, err
+	}
+	return a.normalizeUsage(c, info, parsed)
 }
 
 func (a *AudioAdaptor) SetupRequestHeader(c *gin.Context, headers *http.Header, info *relaycommon.RelayInfo) error {
@@ -120,20 +152,31 @@ func (a *AudioAdaptor) SetupRequestHeader(c *gin.Context, headers *http.Header, 
 func (a *AudioAdaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, audioRequest dto.AudioRequest) (io.Reader, error) {
 	pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint)
 	pinned, ok := pinnedValue.(pluginruntime.PinnedEndpoint)
-	if !exists || !ok || pinned.Plugin != a.plugin || pinned.Protocol != "openai_audio_speech" {
-		return nil, fmt.Errorf("plugin audio endpoint is not pinned")
+	var decodedValue any
+	var err error
+	if routeValue, native := c.Get(pluginruntime.ContextKeyPinnedRoute); native {
+		route, valid := routeValue.(pluginruntime.PinnedRoute)
+		if !valid || route.Plugin != a.plugin || route.Route.Type != pluginruntime.RouteTypeRelay {
+			return nil, fmt.Errorf("plugin audio native route is not pinned")
+		}
+		requestValue, _ := c.Get(pluginruntime.ContextKeyRouteRequest)
+		requestContext, _ := requestValue.(pluginruntime.RouteRequestContext)
+		ctx := requestContext.JSValue()
+		ctx["model"], ctx["upstreamModel"] = info.OriginModelName, info.UpstreamModelName
+		decodedValue, err = a.plugin.Engine.CallPath(c.Request.Context(), "native", []string{route.Route.Decode}, ctx)
+		a.nativeRoute = &route.Route
+		pinned.Model, pinned.Protocol = info.OriginModelName, route.Route.Protocol
+	} else {
+		if !exists || !ok || pinned.Plugin != a.plugin || pinned.Protocol != "openai_audio_speech" {
+			return nil, fmt.Errorf("plugin audio endpoint is not pinned")
+		}
+		protocolValue, exists := c.Get(pluginruntime.ContextKeyProtocolRequest)
+		protocolContext, ok := protocolValue.(pluginruntime.ProtocolRequestContext)
+		if !exists || !ok {
+			return nil, fmt.Errorf("plugin audio request context is missing")
+		}
+		decodedValue, err = a.plugin.Engine.CallPath(context.WithoutCancel(c.Request.Context()), "protocols", []string{pinned.Protocol, "decodeRequest"}, protocolContext.JSValue())
 	}
-	protocolValue, exists := c.Get(pluginruntime.ContextKeyProtocolRequest)
-	protocolContext, ok := protocolValue.(pluginruntime.ProtocolRequestContext)
-	if !exists || !ok {
-		return nil, fmt.Errorf("plugin audio request context is missing")
-	}
-	decodedValue, err := a.plugin.Engine.CallPath(
-		context.WithoutCancel(c.Request.Context()),
-		"protocols",
-		[]string{pinned.Protocol, "decodeRequest"},
-		protocolContext.JSValue(),
-	)
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
@@ -155,10 +198,11 @@ func (a *AudioAdaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.Rel
 		"apiKey":        info.ApiKey,
 		"authHeader":    "Bearer " + info.ApiKey,
 		"config":        config,
+		"userScope":     pluginruntime.UserResourceScope(info.UserId),
 	}
 	value, err := a.plugin.Engine.CallPath(c.Request.Context(), "protocols", []string{pinned.Protocol, "buildRequest"}, ctx)
 	if err != nil {
-		return nil, err
+		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	var descriptor audioRequestDescriptor
 	if err = convert(value, &descriptor); err != nil {
@@ -168,7 +212,7 @@ func (a *AudioAdaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.Rel
 	if _, err = a.GetRequestURL(info); err != nil {
 		return nil, err
 	}
-	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" && descriptor.ResponseType != "pcm" && descriptor.ResponseType != "pcm_batch" && descriptor.ResponseType != "pcm_stream" {
+	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" && descriptor.ResponseType != "pcm" && descriptor.ResponseType != "pcm_batch" && descriptor.ResponseType != "pcm_stream" && !(a.nativeRoute != nil && descriptor.ResponseType == "sse") {
 		return nil, fmt.Errorf("plugin returned unsupported speech response type")
 	}
 	if descriptor.BodyEncoding == "form" || descriptor.BodyEncoding == "multipart" {
@@ -252,6 +296,11 @@ func (a *AudioAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bo
 	originalMethod := c.Request.Method
 	c.Request.Method = http.MethodPost
 	defer func() { c.Request.Method = originalMethod }()
+	if a.request.ResponseType == "sse" {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 5*time.Minute)
+		a.cancel = cancel
+		return channel.DoApiRequestWithContext(ctx, a, c, info, body)
+	}
 	if a.request.ResponseType == "pcm" || a.request.ResponseType == "pcm_batch" || a.request.ResponseType == "pcm_stream" {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Minute)
 		a.cancel = cancel
@@ -262,11 +311,14 @@ func (a *AudioAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bo
 
 func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (any, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
+	if a.nativeRoute != nil && a.request.ResponseType == "sse" && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		return a.readNativeStream(c, resp, info)
+	}
 	batch := a.request != nil && a.request.ResponseType == "pcm_batch"
 	streamPCM := a.request != nil && a.request.ResponseType == "pcm_stream"
 	rawPCM := a.request != nil && (a.request.ResponseType == "pcm" || batch || streamPCM)
 	limit := maxPluginAudioResponseBytes
-	if rawPCM {
+	if rawPCM || a.nativeRoute != nil {
 		limit = defaultPluginAudioBytes
 	}
 	var body []byte
@@ -308,9 +360,21 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 	if err = convert(value, &parsed); err != nil {
 		return nil, pluginAudioResponseError(err)
 	}
-	usage, err := normalizePluginAudioUsage(c, info, parsed)
+	usage, err := a.normalizeUsage(c, info, parsed)
 	if err != nil {
 		return nil, pluginAudioResponseError(err)
+	}
+	if a.nativeRoute != nil {
+		rendered, err := a.plugin.Engine.CallPath(c.Request.Context(), "native", []string{a.nativeRoute.Render}, map[string]any{"requestBody": a.requestBody, "userScope": pluginruntime.UserResourceScope(info.UserId)}, responseBody)
+		if err != nil {
+			return nil, pluginAudioResponseError(err)
+		}
+		encoded, err := common.Marshal(rendered)
+		if err != nil {
+			return nil, pluginAudioResponseError(err)
+		}
+		c.Data(http.StatusOK, "application/json", encoded)
+		return usage, nil
 	}
 	format := strings.ToLower(strings.TrimSpace(parsed.Format))
 	if format == "" {
@@ -404,6 +468,18 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 	}
 	c.Data(http.StatusOK, contentType, audio)
 	return usage, nil
+}
+
+func (a *AudioAdaptor) normalizeUsage(c *gin.Context, info *relaycommon.RelayInfo, parsed audioResponseDescriptor) (*dto.Usage, error) {
+	if snap := info.TieredBillingSnapshot; snap != nil && snap.TaskUsageBilling {
+		facts, err := pluginruntime.ValidateUsageFacts(a.plugin.Meta, parsed.Usage.Facts, info.UpstreamModelName, info.OriginModelName)
+		if err != nil || len(facts) == 0 {
+			return nil, fmt.Errorf("plugin returned invalid speech billing facts: %v", err)
+		}
+		info.BillingRequestInput.Usage = facts
+		return &dto.Usage{}, nil
+	}
+	return normalizePluginAudioUsage(c, info, parsed)
 }
 
 // pluginPCMResponse verifies the upstream's mono PCM contract and wraps the

@@ -391,7 +391,7 @@ func updatePricing() {
 				usageModel = target.Declared
 			}
 		}
-		if ok && plugin != nil && plugin.Meta.UsesTaskDriver() {
+		if ok && plugin != nil && plugin.Meta.UsesTaskUsageForModel(usageModel) {
 			usageSchema, usageExamples := plugin.Meta.UsageForModel(usageModel)
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)

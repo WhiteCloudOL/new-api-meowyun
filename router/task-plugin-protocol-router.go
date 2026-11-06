@@ -11,6 +11,9 @@ import (
 )
 
 func SetTaskPluginProtocolRouter(router *gin.Engine) {
+	for _, path := range []string{"/api-ws/v1/inference", "/api-ws/v1/realtime", "/alibaba-tts/api-ws/v1/inference", "/alibaba-tts/api-ws/v1/realtime"} {
+		router.GET(path, middleware.RouteTag("relay"), middleware.SystemPerformanceCheck(), middleware.TokenAuth(), controller.PluginSpeechWebSocket)
+	}
 	for _, path := range []string{"/health", "/v1/model", "/v1/queue"} {
 		router.GET(path, middleware.RouteTag("relay"), middleware.TokenAuth(), middleware.ModelRequestRateLimit(),
 			middleware.SelectBreezeMetadataModel, middleware.Distribute(), controller.BreezeSpeechMetadata)

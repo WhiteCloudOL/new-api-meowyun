@@ -11,6 +11,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -25,6 +27,29 @@ import (
 // provide the current request body through BodyStorage or BillingRequestInput;
 // channel retries retain the resulting billing session and pricing snapshot.
 func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if _, speech := info.Request.(*dto.AudioRequest); speech {
+		_, native := c.Get(jsplugin.ContextKeyPinnedRoute)
+		_, protocol := c.Get(jsplugin.ContextKeyPinnedEndpoint)
+		if native || protocol {
+			info.InitChannelMeta(c)
+			if err := helper.ModelMappedHelper(c, info, nil); err != nil {
+				return types.NewError(err, types.ErrorCodeChannelModelMappedError)
+			}
+		}
+	}
+	if value, exists := c.Get(jsplugin.ContextKeyPinnedRoute); exists {
+		if pinned, ok := value.(jsplugin.PinnedRoute); ok && pinned.Route.Type == jsplugin.RouteTypeRelay {
+			value, _ := c.Get(jsplugin.ContextKeyRouteRequest)
+			request, _ := value.(jsplugin.RouteRequestContext)
+			if body, ok := request.Body.(map[string]any); ok {
+				encoded, err := common.Marshal(body["value"])
+				if err != nil {
+					return types.NewError(err, types.ErrorCodeInvalidRequest)
+				}
+				info.BillingRequestInput = &billingexpr.RequestInput{Body: encoded, Headers: info.RequestHeaders}
+			}
+		}
+	}
 	meta := &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
 	characterSpeech := false
 	breezeCharacters := 0

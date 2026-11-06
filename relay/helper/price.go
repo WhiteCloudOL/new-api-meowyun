@@ -73,6 +73,23 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
+	if _, speech := info.Request.(*dto.AudioRequest); speech {
+		var plugin *jsplugin.LoadedPlugin
+		if value, exists := c.Get(jsplugin.ContextKeyPinnedRoute); exists {
+			if pinned, ok := value.(jsplugin.PinnedRoute); ok && pinned.Route.Type == jsplugin.RouteTypeRelay {
+				plugin = pinned.Plugin
+			}
+		} else if value, exists := c.Get(jsplugin.ContextKeyPinnedEndpoint); exists {
+			if pinned, ok := value.(jsplugin.PinnedEndpoint); ok && pinned.Protocol == "openai_audio_speech" {
+				plugin = pinned.Plugin
+			}
+		}
+		if plugin != nil {
+			if schema, _ := plugin.Meta.UsageForModels(info.UpstreamModelName, info.OriginModelName); len(schema) > 0 {
+				return modelPriceHelperAudioUsage(c, info, plugin, groupRatioInfo)
+			}
+		}
+	}
 
 	// Check if this model uses tiered_expr billing
 	if billing_setting.GetBillingMode(billingModelName) == billing_setting.BillingModeTieredExpr {
@@ -211,6 +228,61 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	}
 	info.PriceData = priceData
 	return priceData, nil
+}
+
+func modelPriceHelperAudioUsage(c *gin.Context, info *relaycommon.RelayInfo, plugin *jsplugin.LoadedPlugin, group hosttypes.GroupRatioInfo) (hosttypes.PriceData, error) {
+	expression, ok := billing_setting.ResolveTaskBillingExpr(plugin.Meta.Key, info.GetBillingModelName(), info.UpstreamModelName)
+	if !ok || billingexpr.UsesFixedPricing(expression) {
+		return hosttypes.PriceData{}, fmt.Errorf("model %s requires a usage billing expression", info.GetBillingModelName())
+	}
+	schema, _ := plugin.Meta.UsageForModels(info.UpstreamModelName, info.OriginModelName)
+	if !billing_setting.TaskExprCompatible(expression, schema) {
+		return hosttypes.PriceData{}, fmt.Errorf("speech billing expression is incompatible with the model usage schema")
+	}
+	body, _ := c.Get("task_request")
+	audioRequest, _ := info.Request.(*dto.AudioRequest)
+	value, err := plugin.Engine.CallPath(c.Request.Context(), "protocols", []string{"openai_audio_speech", "estimateUsage"}, map[string]any{
+		"requestBody": body, "model": info.OriginModelName, "upstreamModel": info.UpstreamModelName,
+		"inputBytes": len(audioRequest.Input), "fallbackOutputTokens": UnspecifiedTextOutputTokens,
+	})
+	if err != nil {
+		return hosttypes.PriceData{}, err
+	}
+	facts, ok := value.(map[string]any)
+	if !ok {
+		return hosttypes.PriceData{}, fmt.Errorf("speech usage estimate must be an object")
+	}
+	facts, err = jsplugin.ValidateUsageFacts(plugin.Meta, facts, info.UpstreamModelName, info.OriginModelName)
+	if err != nil {
+		return hosttypes.PriceData{}, err
+	}
+	request, err := ResolveIncomingBillingExprRequestInput(c, info)
+	if err != nil {
+		return hosttypes.PriceData{}, err
+	}
+	request.Usage = facts
+	hash := billingexpr.ExprHashString(expression)
+	cost, trace, err := billingexpr.RunExprByHashWithRequest(expression, hash, billingexpr.TokenParams{}, request)
+	if err != nil || cost < 0 {
+		return hosttypes.PriceData{}, fmt.Errorf("invalid speech usage estimate: %v", err)
+	}
+	beforeGroup := cost * common.QuotaPerUnit
+	quota, err := common.QuotaRoundStrict(beforeGroup * group.GroupRatio)
+	if err != nil {
+		return hosttypes.PriceData{}, err
+	}
+	free := !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume &&
+		(group.GroupRatio == 0 || cost == 0 && billingexpr.IsZeroCostByHash(expression, hash, request))
+	info.BillingRequestInput = &request
+	info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{
+		BillingMode: billing_setting.BillingModeTieredExpr, ModelName: info.GetBillingModelName(), ExprString: expression, ExprHash: hash,
+		GroupRatio: group.GroupRatio, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(expression),
+		TaskUsageBilling: true, UsageFacts: facts, EstimatedQuotaBeforeGroup: beforeGroup, EstimatedQuotaAfterGroup: quota,
+		EstimatedTier: trace.MatchedTier, SkipPreConsumeForZeroCost: free && cost == 0,
+	}
+	info.PriceData = hosttypes.PriceData{FreeModel: free, GroupRatioInfo: group, QuotaToPreConsume: quota}
+	info.ForcePreConsume = true
+	return info.PriceData, nil
 }
 
 // ModelPriceHelperPerCall 按次/按量计费的 PriceHelper (MJ、Task)

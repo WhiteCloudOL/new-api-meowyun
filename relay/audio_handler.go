@@ -43,6 +43,13 @@ func AudioHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			adaptor = audioAdaptor
 		}
 	}
+	if value, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
+		if pinned, valid := value.(pluginruntime.PinnedRoute); valid && pinned.Plugin != nil && pinned.Route.Type == pluginruntime.RouteTypeRelay {
+			audioAdaptor := jspluginadaptor.NewAudio(pinned.Plugin)
+			defer audioAdaptor.Close()
+			adaptor = audioAdaptor
+		}
+	}
 	if adaptor == nil {
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}

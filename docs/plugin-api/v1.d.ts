@@ -34,13 +34,13 @@ export type DecodedBody =
   | Readonly<{kind: "none"}>;
 
 /** requestHeaders: the client's request headers, as DriverContext.requestHeaders holds them. Older gateways do not pass them to decoders. */
-export interface NativeDecodeContext {method: string; path: string; params: Readonly<Record<string, string>>; query: Readonly<Record<string, readonly string[]>>; requestHeaders: Readonly<Record<string, string>>; body: DecodedBody}
+export interface NativeDecodeContext {userScope?: string; model?: string; upstreamModel?: string; method: string; path: string; params: Readonly<Record<string, string>>; query: Readonly<Record<string, readonly string[]>>; requestHeaders: Readonly<Record<string, string>>; body: DecodedBody}
 export interface ProtocolDecodeContext extends NativeDecodeContext {protocol: ProtocolName; operation: string; model: string; upstreamModel?: string; stream: boolean}
 export type SubmitIntent = {kind: "submit"; model: string; action?: string; requestBody?: unknown; originTaskIds?: readonly string[]};
-export type RelayIntent = {kind: "relay"; model: string; requestBody?: unknown};
+export type RelayIntent = {kind: "relay"; model: string; requestBody?: unknown; /** Required on native relay routes; normalized host AudioRequest. */ request?: {model: string; input: string; voice?: string; response_format?: string}; targetModel?: string};
 export type QueryIntent = {kind: "query"; taskIds: readonly string[]};
-export type TaskIntent = SubmitIntent | QueryIntent;
-export interface NativeRoute {method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; /** The vendor's own path; the host also serves it under /{key} unless its first segment is the key or a proper prefix of it. */ path: string; type: "submit" | "query" | "dynamic"; action?: string; /** Query routes: the path parameter carrying the gateway task id or, when the path has none, the query-string parameter of that name. Default "task_id". */ taskIdParam?: string; decode?: string; render: string; models?: readonly string[]; retainResult?: boolean}
+export type TaskIntent = SubmitIntent | QueryIntent | RelayIntent;
+export interface NativeRoute {method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; /** The vendor's own path; the host also serves it under /{key} unless its first segment is the key or a proper prefix of it. */ path: string; type: "submit" | "query" | "dynamic" | "relay"; /** relay routes require POST, decode, render and this protocol; prohibit taskIdParam and retainResult. */ protocol?: "openai_audio_speech"; action?: string; /** Query routes: the path parameter carrying the gateway task id or, when the path has none, the query-string parameter of that name. Default "task_id". */ taskIdParam?: string; decode?: string; render: string; models?: readonly string[]; retainResult?: boolean}
 export type ProtocolName = "openai_responses" | "openai_video" | "openai_audio_speech" | "openai_image";
 export type ResponsesMode = "stream" | "sync" | "background";
 export type ProtocolClaim =
@@ -80,19 +80,19 @@ export declare const native: Record<string, ((ctx: NativeDecodeContext) => TaskI
 export declare const protocols: {
   openai_responses?: {decodeRequest(ctx: ProtocolDecodeContext): SubmitIntent; renderEvents?(ctx: unknown, task: TaskView, previousState: unknown): unknown; renderFinal?(ctx: unknown, task: TaskView): unknown};
   openai_video?: {decodeRequest(ctx: ProtocolDecodeContext): SubmitIntent; render(ctx: unknown, task: TaskView): unknown};
-  openai_audio_speech?: {decodeRequest(ctx: ProtocolDecodeContext): RelayIntent; buildRequest(ctx: AudioDriverContext): AudioRequestDescriptor; parseResponse(ctx: AudioResponseContext): AudioResponseDescriptor};
+  openai_audio_speech?: {decodeRequest(ctx: ProtocolDecodeContext): RelayIntent; buildRequest(ctx: AudioDriverContext): AudioRequestDescriptor; parseResponse(ctx: AudioResponseContext): AudioResponseDescriptor; estimateUsage?(ctx: {requestBody: unknown; model: string; upstreamModel: string; inputBytes: number; fallbackOutputTokens: number}): Readonly<Record<string, number | string | boolean>>};
   /** render returns the OpenAI ImageResponse; the host adds `created` when absent and resolves response_format b64_json. */
   openai_image?: {decodeRequest(ctx: ProtocolDecodeContext): SubmitIntent; render(ctx: unknown, task: TaskView): {created?: number; data: readonly ImageResponseEntry[]} & Record<string, unknown>};
 };
-export interface AudioDriverContext {requestBody: unknown; model: string; upstreamModel: string; baseUrl: string; apiKey?: string; authHeader: string; config: Readonly<Record<string, JSONValue>>}
+export interface AudioDriverContext {userScope?: string; requestBody: unknown; model: string; upstreamModel: string; baseUrl: string; apiKey?: string; authHeader: string; config: Readonly<Record<string, JSONValue>>}
 export type AudioRequestDescriptor = Pick<RequestDescriptor, "url" | "method" | "headers" | "body"> & {
   bodyEncoding?: "json" | "form" | "multipart";
-  responseType?: "json" | "pcm" | "pcm_batch" | "pcm_stream";
+  responseType?: "json" | "pcm" | "pcm_batch" | "pcm_stream" | "sse";
   referenceAudio?: string;
   referenceFilename?: string;
 };
 export interface AudioResponseContext {statusCode: number; headers: Readonly<Record<string, readonly string[]>>; body: unknown; requestBody?: unknown; inputCharacters: number; config: Readonly<Record<string, JSONValue>>}
-export interface AudioResponseDescriptor {audio?: {data?: string; url?: string}; format?: "mp3" | "wav" | "pcm" | "opus"; requestId?: string; allowedHostSuffixes?: readonly string[]; maxBytes?: number; timeoutSeconds?: number; usage: {characters?: number; inputTextTokens?: number; outputAudioTokens?: number; totalTokens?: number}}
+export interface AudioResponseDescriptor {done?: boolean; audio?: {data?: string; url?: string}; format?: "mp3" | "wav" | "pcm" | "opus"; requestId?: string; allowedHostSuffixes?: readonly string[]; maxBytes?: number; timeoutSeconds?: number; usage: {facts?: Readonly<Record<string, number | string | boolean>>; characters?: number; inputTextTokens?: number; outputAudioTokens?: number; totalTokens?: number}}
 export declare function validateConfig(config: Readonly<Record<string, JSONValue>>): unknown;
 export declare function buildSubmitRequest(ctx: DriverContext): RequestDescriptor;
 export interface SubmitEvent {event: string; id: string; data: string}

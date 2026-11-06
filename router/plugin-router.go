@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -91,6 +92,11 @@ func newPluginGenerationBuilder(staticRoutes []gin.RouteInfo, trustedProxies []s
 		routeHandlers:  handlers,
 	}
 	for _, staticRoute := range staticRoutes {
+		// These built-in transports belong to the plugin's own namespace;
+		// they must not exclude its HTTP routes from the same generation.
+		if staticRoute.Method == http.MethodGet && (staticRoute.Path == "/alibaba-tts/api-ws/v1/inference" || staticRoute.Path == "/alibaba-tts/api-ws/v1/realtime") {
+			continue
+		}
 		first, _, _ := strings.Cut(strings.TrimPrefix(staticRoute.Path, "/"), "/")
 		if first != "" && !strings.HasPrefix(first, ":") && !strings.HasPrefix(first, "*") {
 			builder.hostSegments[first] = struct{}{}
@@ -153,7 +159,14 @@ func productionPluginRouteHandlers(generation *jsplugin.RoutingGeneration, group
 		middleware.ModelRequestRateLimit(),
 		middleware.PrepareTaskPluginRoute(),
 		middleware.Distribute(),
-		controller.RelayTask,
+		func(c *gin.Context) {
+			value, _ := c.Get(jsplugin.ContextKeyPinnedRoute)
+			if pinned, ok := value.(jsplugin.PinnedRoute); ok && pinned.Route.Type == jsplugin.RouteTypeRelay {
+				controller.Relay(c, types.RelayFormatOpenAIAudio)
+				return
+			}
+			controller.RelayTask(c)
+		},
 	}
 }
 

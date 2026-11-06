@@ -14,6 +14,10 @@ func TestHostProtocolRegistryDrivesProtocolRoutesOnce(t *testing.T) {
 	SetTaskPluginProtocolRouter(engine)
 
 	expected := []string{
+		"GET /api-ws/v1/inference",
+		"GET /api-ws/v1/realtime",
+		"GET /alibaba-tts/api-ws/v1/inference",
+		"GET /alibaba-tts/api-ws/v1/realtime",
 		"POST /v1/audio/speech",
 		"POST /v1/audio/speech/batch",
 		"GET /health",

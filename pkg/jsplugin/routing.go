@@ -18,10 +18,24 @@ import (
 
 type RouteType string
 
+// UserResourceScope is a vendor-compatible, unique prefix for user-owned
+// resources on a shared provider account. Unsupported IDs fail closed.
+func UserResourceScope(userID int) string {
+	if userID <= 0 {
+		return ""
+	}
+	scope := "u" + strconv.FormatInt(int64(userID), 36)
+	if len(scope) > 10 {
+		return ""
+	}
+	return "u" + strings.Repeat("0", 10-len(scope)) + scope[1:]
+}
+
 const (
 	RouteTypeSubmit  RouteType = "submit"
 	RouteTypeQuery   RouteType = "query"
 	RouteTypeDynamic RouteType = "dynamic"
+	RouteTypeRelay   RouteType = "relay"
 )
 
 type Route struct {
@@ -32,6 +46,7 @@ type Route struct {
 	Decode      string    `json:"decode,omitempty"`
 	Render      string    `json:"render,omitempty"`
 	TaskIDParam string    `json:"taskIdParam,omitempty"`
+	Protocol    string    `json:"protocol,omitempty"`
 	// RetainResult, when explicitly false on a submit or dynamic route, tells
 	// the host not to persist the upstream snapshot of an immediate terminal
 	// result and to treat the task as not found on every retrieval surface
@@ -327,11 +342,12 @@ func ParseFileReference(ref string) (field string, index int, ok bool) {
 // routing hooks. RequestBody contains decoded JSON or multipart text fields;
 // raw binary and multipart file bytes remain host-owned.
 type RouteRequestContext struct {
-	Path   string              `json:"path"`
-	Method string              `json:"method"`
-	Params map[string]string   `json:"params"`
-	Query  map[string][]string `json:"query"`
-	Body   any                 `json:"body"`
+	UserScope string              `json:"userScope,omitempty"`
+	Path      string              `json:"path"`
+	Method    string              `json:"method"`
+	Params    map[string]string   `json:"params"`
+	Query     map[string][]string `json:"query"`
+	Body      any                 `json:"body"`
 	// Headers is the client's request headers without gateway credentials,
 	// which hooks read as requestHeaders.
 	Headers     map[string]string `json:"-"`
@@ -360,6 +376,7 @@ func (r RouteRequestContext) JSValue() map[string]any {
 		headers = map[string]string{}
 	}
 	return map[string]any{
+		"userScope":      r.UserScope,
 		"path":           r.Path,
 		"method":         r.Method,
 		"params":         params,
@@ -419,8 +436,13 @@ func SupportsHostProtocol(protocol string) bool { _, ok := HostProtocol(protocol
 
 // UsesTaskDriver reports whether the manifest has task submission hooks.
 func (meta Meta) UsesTaskDriver() bool {
-	if len(meta.Protocols) == 0 || len(meta.Routes) > 0 {
+	if len(meta.Protocols) == 0 && len(meta.Routes) == 0 {
 		return true
+	}
+	for _, route := range meta.Routes {
+		if route.Type != RouteTypeRelay {
+			return true
+		}
 	}
 	for _, claim := range meta.Protocols {
 		if definition, _ := HostProtocol(claim.Name); definition.UsesTaskDriver {
@@ -428,6 +450,13 @@ func (meta Meta) UsesTaskDriver() bool {
 		}
 	}
 	return false
+}
+
+func (meta Meta) UsesTaskUsageForModel(model string) bool {
+	if schema, _ := meta.UsageForModel(model); len(schema) > 0 {
+		return true
+	}
+	return meta.UsesTaskDriver()
 }
 
 // RoutingGeneration is an immutable, request-pinnable view of all effective
@@ -547,7 +576,7 @@ func (g *RoutingGeneration) PluginsByModel(model string) []*LoadedPlugin {
 // TaskPluginsByModel returns the providers that use task usage expressions.
 func (g *RoutingGeneration) TaskPluginsByModel(model string) []*LoadedPlugin {
 	return slices.DeleteFunc(g.PluginsByModel(model), func(plugin *LoadedPlugin) bool {
-		return !plugin.Meta.UsesTaskDriver()
+		return !plugin.Meta.UsesTaskUsageForModel(model)
 	})
 }
 
@@ -925,6 +954,10 @@ func validateRoute(route *Route) error {
 		return fmt.Errorf("plugin route path %q intersects reserved namespace %s", route.Path, namespace)
 	}
 	switch route.Type {
+	case RouteTypeRelay:
+		if route.Method != http.MethodPost || route.Protocol != "openai_audio_speech" || route.Decode == "" || route.Render == "" || route.TaskIDParam != "" || route.RetainResult != nil {
+			return fmt.Errorf("relay route %s %s requires POST, openai_audio_speech, decode and render", route.Method, route.Path)
+		}
 	case RouteTypeSubmit:
 		if route.Decode == "" || route.Render == "" || route.TaskIDParam != "" {
 			return fmt.Errorf("submit route %s %s must declare decode and render and must not declare taskIdParam", route.Method, route.Path)
@@ -951,6 +984,9 @@ func validateRoute(route *Route) error {
 		}
 	default:
 		return fmt.Errorf("plugin route %s %s has unsupported type %q", route.Method, route.Path, route.Type)
+	}
+	if route.Type != RouteTypeRelay && route.Protocol != "" {
+		return fmt.Errorf("only relay routes may declare protocol")
 	}
 	if route.Decode != "" && !memberNamePattern.MatchString(route.Decode) {
 		return fmt.Errorf("plugin route %s %s has invalid decode %q", route.Method, route.Path, route.Decode)
