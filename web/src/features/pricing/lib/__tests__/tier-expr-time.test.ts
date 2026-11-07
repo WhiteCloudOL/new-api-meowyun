@@ -36,6 +36,7 @@ const emptyExtras: ExtraTokenValues = {
   imageCacheTokens: 0,
   cacheCreateTokens: 0,
   cacheCreate1hTokens: 0,
+  cacheCreate12hTokens: 0,
   imageTokens: 0,
   imageOutputTokens: 0,
   audioInputTokens: 0,

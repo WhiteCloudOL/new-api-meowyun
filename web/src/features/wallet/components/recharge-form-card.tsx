@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
+import { Gift, Loader2, Receipt, WalletCards } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 
@@ -52,6 +52,7 @@ import type {
   WaffoPayMethod,
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
+import { RedemptionPurchaseBanner } from './redemption-purchase-banner'
 
 interface RechargeFormCardProps {
   topupInfo: TopupInfo | null
@@ -142,6 +143,22 @@ export function RechargeFormCard({
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
   const redemptionEnabled = topupInfo?.enable_redemption !== false
+  let redemptionPurchaseUrl: string | undefined
+  if (topupLink) {
+    try {
+      const url = new URL(topupLink)
+      if (
+        ['https:', 'http:'].includes(url.protocol) &&
+        !url.username &&
+        !url.password
+      ) {
+        redemptionPurchaseUrl = url.href
+      }
+    } catch {
+      // Invalid store links must not become navigable wallet actions.
+    }
+  }
+  const showPurchaseBanner = redemptionEnabled && !!redemptionPurchaseUrl
 
   if (loading) {
     return (
@@ -216,8 +233,11 @@ export function RechargeFormCard({
       }
       contentClassName='space-y-4 sm:space-y-6'
     >
+      {showPurchaseBanner && redemptionPurchaseUrl && (
+        <RedemptionPurchaseBanner url={redemptionPurchaseUrl} />
+      )}
       {/* Online Topup Section */}
-      {hasAnyTopup ? (
+      {hasAnyTopup && (
         <div className='space-y-4 sm:space-y-6'>
           {hasConfigurableTopup && (
             <>
@@ -487,7 +507,8 @@ export function RechargeFormCard({
             </>
           )}
         </div>
-      ) : (
+      )}
+      {!hasAnyTopup && !showPurchaseBanner && (
         <Alert>
           <AlertDescription>
             {t(
@@ -545,20 +566,6 @@ export function RechargeFormCard({
               {t('Redeem')}
             </Button>
           </div>
-          {topupLink && (
-            <p className='text-muted-foreground text-xs'>
-              {t('Need a redemption code?')}{' '}
-              <a
-                href={topupLink}
-                target='_blank'
-                rel='noopener noreferrer'
-                className='inline-flex items-center gap-1 underline-offset-4 hover:underline'
-              >
-                {t('Get one here')}
-                <ExternalLink className='h-3 w-3' />
-              </a>
-            </p>
-          )}
         </div>
       ) : (
         <Alert className='border-t'>
