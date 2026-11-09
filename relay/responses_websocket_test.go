@@ -641,6 +641,40 @@ func TestResponsesWSMessageSizeLimit(t *testing.T) {
 	assert.False(t, admitted.Load())
 }
 
+func TestResponsesWSProviderPrivacyKeepsClientRequests(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	setting := operation_setting.GetGeneralSetting()
+	previous := setting.HideUpstreamInfo
+	t.Cleanup(func() { setting.HideUpstreamInfo = previous })
+	client, server, cleanup := newTestWebSocketPair(t)
+	t.Cleanup(cleanup)
+	s := &responsesWSSession{client: server, target: server}
+	frame := []byte(`{"type":"response.completed","provider":"PrivateProvider","response":{"provider_url":"https://provider.example","output":[{"text":"See https://reference.example/source"}],"usage":{"input_tokens":4}}}`)
+	for _, hidden := range []bool{false, true} {
+		setting.HideUpstreamInfo = hidden
+		require.NoError(t, s.writeClient(websocket.TextMessage, frame, true))
+		_, received, err := client.ReadMessage()
+		require.NoError(t, err)
+		if hidden {
+			assert.NotContains(t, string(received), "PrivateProvider")
+			assert.NotContains(t, string(received), "provider.example")
+		} else {
+			assert.Equal(t, frame, received)
+		}
+		assert.Contains(t, string(received), "https://reference.example/source")
+		assert.Contains(t, string(received), `"input_tokens":4`)
+		require.NoError(t, s.writeTarget(websocket.TextMessage, frame))
+		_, received, err = client.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, frame, received)
+	}
+	hostError := []byte(`{"error":{"message":"input is required"}}`)
+	require.NoError(t, s.writeClient(websocket.TextMessage, hostError, false))
+	_, received, err := client.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, hostError, received)
+}
+
 func TestResponsesWSShutdownInterruptsBusyWriter(t *testing.T) {
 	client, server, cleanupClient := newTestWebSocketPair(t)
 	defer cleanupClient()
