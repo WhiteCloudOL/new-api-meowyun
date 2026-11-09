@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	BreezeSpeechModel       = "breeze-tts"
-	BreezeBatchPath         = "/v1/audio/speech/batch"
+	BreezeSpeechModel       = "breeze-tts-2"
+	BreezePluginKey         = "breeze-tts"
 	BreezeMaxReferenceBytes = 10 << 20
 )
 

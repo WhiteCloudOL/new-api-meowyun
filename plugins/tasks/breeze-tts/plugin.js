@@ -2,13 +2,13 @@ export const meta = {
   apiVersion: 1,
   key: "breeze-tts",
   name: "BreezeTTS",
-  version: "1.1.0",
+  version: "2.0.0",
   author: { name: "MeowYun" },
   description: {
-    en: "Speech synthesis through a self-hosted BreezeTTS API",
-    zh: "通过自托管 BreezeTTS 接口合成语音",
+    en: "GGUF speech synthesis through Breeze-TTS-2.cpp",
+    zh: "通过 Breeze-TTS-2.cpp 合成 GGUF 模型语音",
   },
-  models: ["breeze-tts"],
+  models: ["breeze-tts-2"],
   fetchMode: "per_task",
   auth: "api_key",
   protocols: ["openai_audio_speech"],
@@ -18,48 +18,59 @@ export const protocols = {
   openai_audio_speech: {
     decodeRequest(ctx) {
       const body = ctx.body.value;
+      if (ctx.operation !== "create") throw new Error("Breeze-TTS-2.cpp does not support batch synthesis");
       if (ctx.body.kind !== "json" || !body || typeof body.input !== "string" || !body.input.trim()) {
         throw new Error("input is required");
       }
-      const batch = ctx.operation === "batch";
-      const format = batch ? "pcm" : body.response_format ?? "wav";
-      if (format !== "pcm" && format !== "wav") {
-        throw new Error("response_format must be wav or pcm");
+      const native = body.breeze_native_pcm === true;
+      const format = native ? "pcm" : body.response_format ?? "mp3";
+      if (!["mp3", "wav", "pcm", "opus", "aac", "flac"].includes(format)) {
+        throw new Error("response_format must be mp3, wav, pcm, opus, aac or flac");
       }
-      const fields = batch ? { texts: JSON.stringify(body.texts) } : { text: body.input };
-      const instruction = body.instruction ?? body.instructions;
-      if (instruction !== undefined) {
-        if (typeof instruction !== "string") throw new Error("instruction must be a string");
-        if (instruction.trim()) fields.instruction = instruction;
+      const stream = body.stream_format ?? "audio";
+      if (stream !== "audio" && stream !== "sse") throw new Error("stream_format must be audio or sse");
+      const fields = native ? { text: body.input } : { input: body.input, model: ctx.upstreamModel || ctx.model, response_format: format, stream_format: stream };
+      const instruction = native ? body.instruction : body.instructions;
+      if (instruction !== undefined && instruction !== null) {
+        if (typeof instruction !== "string") throw new Error("instructions must be a string");
+        fields[native ? "instruction" : "instructions"] = instruction;
       }
-      for (const name of ["cfg_scale", "seed", ...(batch ? ["max_new_tokens"] : [])]) {
-        if (body[name] === undefined) continue;
+      // Zero means the GGUF model's default. Preserve it, including in forms.
+      const limits = {
+        cfg_scale: [0, 20], seed: [-2147483648, 2147483647, true],
+        temperature: [0, 10], top_k: [0, 10000, true], top_p: [0, 1],
+        repetition_penalty: [0, 100], split_chars: [0, 4096, true],
+        max_new_tokens: [0, 1500, true],
+      };
+      for (const name of Object.keys(limits)) {
+        if (body[name] === undefined || body[name] === null) continue;
         const raw = body[name];
         const value = typeof raw === "string" && raw.trim() ? Number(raw) : raw;
-        if (typeof value !== "number" || !Number.isFinite(value) ||
-            (name === "cfg_scale" && value <= 0) ||
-            (name === "seed" && (!Number.isInteger(value) || value < 0 || value > 4294967295)) ||
-            (name === "max_new_tokens" && !Number.isSafeInteger(value))) {
+        const [lo, hi, integer] = limits[name];
+        if (typeof value !== "number" || !Number.isFinite(value) || value < lo || value > hi || (integer && !Number.isInteger(value))) {
           throw new Error(name + " is out of range");
         }
-        fields[name] = String(name === "max_new_tokens" ? Math.max(1, Math.min(1500, value)) : value);
+        fields[name] = native ? String(value) : value;
       }
-      if (body.ref_text !== undefined && typeof body.ref_text !== "string") {
-        throw new Error("ref_text must be a string");
+      if (native) {
+        for (const name of ["voice_id", "ref_text"]) {
+          if (body[name] === undefined) continue;
+          if (typeof body[name] !== "string") throw new Error(name + " must be a string");
+          fields[name] = body[name];
+        }
+        if (body.ref_audio !== undefined && (typeof body.ref_audio !== "string" || !body.ref_text?.trim())) {
+          throw new Error("ref_audio requires ref_text");
+        }
+      } else if (body.voice !== undefined && body.voice !== null) {
+        const voice = body.voice;
+        if (typeof voice !== "string" && (!voice || typeof voice !== "object" || Array.isArray(voice) || typeof voice.id !== "string")) {
+          throw new Error("voice must be a string or an object with an id");
+        }
+        fields.voice = voice;
       }
-      if (Boolean(body.ref_audio) !== Boolean(body.ref_text?.trim()) ||
-          (body.ref_audio !== undefined && typeof body.ref_audio !== "string")) {
-        throw new Error("ref_audio and ref_text must be provided together");
-      }
-      if (body.ref_audio) fields.ref_text = body.ref_text;
       return {
-        kind: "relay",
-        model: ctx.model,
-        requestBody: {
-          fields, format, batch, streaming: !batch && format === "pcm" && body.breeze_native_pcm === true,
-          referenceAudio: body.ref_audio,
-          referenceFilename: body.ref_audio_filename,
-        },
+        kind: "relay", model: ctx.model,
+        requestBody: { fields, format, native, sse: !native && stream === "sse", referenceAudio: native ? body.ref_audio : undefined, referenceFilename: body.ref_audio_filename },
       };
     },
 
@@ -70,20 +81,19 @@ export const protocols = {
       const base = ctx.baseUrl.replace(/\/+$/, "");
       const request = ctx.requestBody;
       return {
-        url: base + (base.endsWith("/v1") ? "" : "/v1") + "/audio/speech" + (request.batch ? "/batch" : ""),
-        method: "POST",
-        headers: { Authorization: ctx.authHeader },
-        bodyEncoding: request.referenceAudio ? "multipart" : "form",
-        responseType: request.batch ? "pcm_batch" : request.streaming ? "pcm_stream" : "pcm",
-        body: request.fields,
-        referenceAudio: request.referenceAudio,
-        referenceFilename: request.referenceFilename,
+        url: base + (base.endsWith("/v1") ? "" : "/v1") + "/audio/speech",
+        method: "POST", headers: { Authorization: ctx.authHeader },
+        bodyEncoding: request.native ? request.referenceAudio ? "multipart" : "form" : "json",
+        responseType: request.sse ? "sse" : request.native ? "pcm_stream" : "audio_stream",
+        body: request.fields, referenceAudio: request.referenceAudio, referenceFilename: request.referenceFilename,
       };
     },
 
     parseResponse(ctx) {
       return {
+        done: ctx.requestBody.sse && ctx.body?.type === "speech.audio.done",
         format: ctx.requestBody.format,
+        // Upstream SSE token counts are always zero; billing uses submitted text.
         usage: { characters: ctx.inputCharacters },
       };
     },

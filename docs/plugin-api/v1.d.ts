@@ -87,12 +87,12 @@ export declare const protocols: {
 export interface AudioDriverContext {userScope?: string; requestBody: unknown; model: string; upstreamModel: string; baseUrl: string; apiKey?: string; authHeader: string; config: Readonly<Record<string, JSONValue>>}
 export type AudioRequestDescriptor = Pick<RequestDescriptor, "url" | "method" | "headers" | "body"> & {
   bodyEncoding?: "json" | "form" | "multipart";
-  responseType?: "json" | "pcm" | "pcm_batch" | "pcm_stream" | "sse";
+  responseType?: "json" | "pcm" | "pcm_batch" | "pcm_stream" | "audio_stream" | "sse";
   referenceAudio?: string;
   referenceFilename?: string;
 };
 export interface AudioResponseContext {statusCode: number; headers: Readonly<Record<string, readonly string[]>>; body: unknown; requestBody?: unknown; inputCharacters: number; config: Readonly<Record<string, JSONValue>>}
-export interface AudioResponseDescriptor {done?: boolean; audio?: {data?: string; url?: string}; format?: "mp3" | "wav" | "pcm" | "opus"; requestId?: string; allowedHostSuffixes?: readonly string[]; maxBytes?: number; timeoutSeconds?: number; usage: {facts?: Readonly<Record<string, number | string | boolean>>; characters?: number; inputTextTokens?: number; outputAudioTokens?: number; totalTokens?: number}}
+export interface AudioResponseDescriptor {done?: boolean; audio?: {data?: string; url?: string}; format?: "mp3" | "wav" | "pcm" | "opus" | "aac" | "flac"; requestId?: string; allowedHostSuffixes?: readonly string[]; maxBytes?: number; timeoutSeconds?: number; usage: {facts?: Readonly<Record<string, number | string | boolean>>; characters?: number; inputTextTokens?: number; outputAudioTokens?: number; totalTokens?: number}}
 export declare function validateConfig(config: Readonly<Record<string, JSONValue>>): unknown;
 export declare function buildSubmitRequest(ctx: DriverContext): RequestDescriptor;
 export interface SubmitEvent {event: string; id: string; data: string}

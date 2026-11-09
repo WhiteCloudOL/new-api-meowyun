@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"net/url"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -3040,86 +3041,91 @@ func TestBreezeSpeechAdaptor(t *testing.T) {
 	require.NoError(t, err)
 	plugin, err := pluginruntime.CompilePlugin(source, pluginruntime.Options{})
 	require.NoError(t, err)
-
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
-	model := relaycommon.BreezeSpeechModel
-	const input = "A汉&"
-	info := &relaycommon.RelayInfo{
-		OriginModelName: model,
-		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: model,
-			ChannelBaseUrl:    "https://speech.example/v1/",
-			ApiKey:            "provider-test-key",
-		},
-	}
-	info.SetEstimatePromptTokens(4)
-	ctx.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{
-		Plugin: plugin, Protocol: "openai_audio_speech", Model: model,
-	})
-	ctx.Set(pluginruntime.ContextKeyProtocolRequest, pluginruntime.ProtocolRequestContext{
-		Model: model,
-		RouteRequestContext: pluginruntime.RouteRequestContext{
-			Body: map[string]any{
-				"kind":  "json",
-				"value": map[string]any{"input": input, "instructions": "Slow & clear"},
-			},
-		},
-	})
-	adaptor := NewAudio(plugin)
-	body, err := adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{Model: model, Input: input})
-	require.NoError(t, err)
-	encoded, err := io.ReadAll(body)
-	require.NoError(t, err)
-	assert.Equal(t, "instruction=Slow+%26+clear&text=A%E6%B1%89%26", string(encoded))
-	target, err := adaptor.GetRequestURL(info)
-	require.NoError(t, err)
-	assert.Equal(t, "https://speech.example/v1/audio/speech", target)
-	headers := http.Header{}
-	require.NoError(t, adaptor.SetupRequestHeader(ctx, &headers, info))
-	assert.Equal(t, "application/x-www-form-urlencoded", headers.Get("Content-Type"))
-	assert.Equal(t, "Bearer provider-test-key", headers.Get("Authorization"))
-	_, err = adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{Model: model, Input: "different"})
-	require.ErrorContains(t, err, "must match the billed input")
-
+	modelName := relaycommon.BreezeSpeechModel
 	for _, tc := range []struct {
-		name         string
-		format       string
-		sampleFormat string
-		data         string
-		wantError    bool
+		name                                       string
+		body                                       map[string]any
+		contentType, data, responseType, wantError string
 	}{
-		{name: "wav", format: "wav", sampleFormat: "s16le", data: "\x00\x80"},
-		{name: "pcm", format: "pcm", sampleFormat: "s16le", data: "\x00\x80"},
-		{name: "unsupported sample format", format: "wav", sampleFormat: "f32le", data: "\x00\x80", wantError: true},
-		{name: "partial sample", format: "pcm", sampleFormat: "s16le", data: "\x80", wantError: true},
-		{name: "empty upstream body", format: "wav", sampleFormat: "s16le", wantError: true},
+		{name: "native voice and zero sampling", body: map[string]any{"input": "A汉&", "breeze_native_pcm": true, "voice_id": "narrator", "instruction": "Slow & clear", "temperature": "0", "top_k": "0", "top_p": "0", "repetition_penalty": "0", "max_new_tokens": "0", "split_chars": "0", "seed": "-1"}, contentType: "audio/pcm", data: "\x00\x80", responseType: "pcm_stream"},
+		{name: "OpenAI defaults to MP3", body: map[string]any{"input": "A汉&", "voice": "narrator", "instructions": "Slow & clear"}, contentType: "audio/mpeg", data: "\xff\xfbMP3", responseType: "audio_stream"},
+		{name: "OpenAI WAV fallback", body: map[string]any{"input": "A汉&", "response_format": "opus"}, contentType: "audio/wav", data: "RIFFtestWAVE", responseType: "audio_stream"},
+		{name: "OpenAI SSE", body: map[string]any{"input": "A汉&", "response_format": "pcm", "stream_format": "sse"}, contentType: "text/event-stream", data: "data: {\"type\":\"speech.audio.delta\",\"audio\":\"AIA=\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"total_tokens\":0}}\n\n", responseType: "sse"},
+		{name: "unbounded frame cap", body: map[string]any{"input": "A汉&", "max_new_tokens": 1501}, wantError: "max_new_tokens is out of range"},
+		{name: "negative top k", body: map[string]any{"input": "A汉&", "top_k": -1}, wantError: "top_k is out of range"},
+		{name: "invalid sample fraction", body: map[string]any{"input": "A汉&", "top_p": 2}, wantError: "top_p is out of range"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
-			adaptor.requestBody = map[string]any{"format": tc.format}
-			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.data))}
-			resp.Header.Set("Content-Type", "audio/pcm")
-			resp.Header.Set("X-Sample-Rate", "24000")
-			resp.Header.Set("X-Sample-Format", tc.sampleFormat)
-			usage, apiErr := adaptor.DoResponse(ctx, resp, info)
-			if tc.wantError {
-				require.NotNil(t, apiErr)
-				assert.Empty(t, recorder.Body.String())
+			info := &relaycommon.RelayInfo{OriginModelName: modelName, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: modelName, ChannelBaseUrl: "https://speech.example/v1/", ApiKey: "provider-test-key"}}
+			info.SetEstimatePromptTokens(4)
+			ctx.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{Plugin: plugin, Protocol: "openai_audio_speech", Model: modelName, Operation: pluginruntime.HostProtocolOperation{Name: "create"}})
+			ctx.Set(pluginruntime.ContextKeyProtocolRequest, pluginruntime.ProtocolRequestContext{Model: modelName, Operation: "create", RouteRequestContext: pluginruntime.RouteRequestContext{Body: map[string]any{"kind": "json", "value": tc.body}}})
+			adaptor := NewAudio(plugin)
+			body, err := adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{Model: modelName, Input: "A汉&"})
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
 				return
 			}
+			require.NoError(t, err)
+			encoded, err := io.ReadAll(body)
+			require.NoError(t, err)
+			if tc.responseType == "pcm_stream" {
+				fields, err := url.ParseQuery(string(encoded))
+				require.NoError(t, err)
+				assert.Equal(t, "A汉&", fields.Get("text"))
+				assert.Equal(t, "narrator", fields.Get("voice_id"))
+				assert.Equal(t, "Slow & clear", fields.Get("instruction"))
+				for _, name := range []string{"temperature", "top_k", "top_p", "repetition_penalty", "max_new_tokens", "split_chars"} {
+					assert.Equal(t, "0", fields.Get(name), name)
+				}
+			} else {
+				var fields map[string]any
+				require.NoError(t, common.Unmarshal(encoded, &fields))
+				assert.Equal(t, "A汉&", fields["input"])
+				if tc.name == "OpenAI defaults to MP3" {
+					assert.Equal(t, "mp3", fields["response_format"])
+					assert.Equal(t, "narrator", fields["voice"])
+				}
+			}
+			target, err := adaptor.GetRequestURL(info)
+			require.NoError(t, err)
+			assert.Equal(t, "https://speech.example/v1/audio/speech", target)
+			headers := http.Header{}
+			require.NoError(t, adaptor.SetupRequestHeader(ctx, &headers, info))
+			assert.Equal(t, "Bearer provider-test-key", headers.Get("Authorization"))
+			assert.Equal(t, tc.responseType, adaptor.request.ResponseType)
+			_, err = adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{Model: modelName, Input: "different"})
+			require.ErrorContains(t, err, "must match the billed input")
+			response := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.contentType}, "X-Sample-Rate": {"24000"}, "X-Sample-Format": {"s16le"}}, Body: io.NopCloser(strings.NewReader(tc.data))}
+			usage, apiErr := adaptor.DoResponse(ctx, response, info)
 			require.Nil(t, apiErr)
 			assert.Equal(t, 4, usage.(*dto.Usage).PromptTokens)
-			assert.Equal(t, "audio/"+tc.format, recorder.Header().Get("Content-Type"))
-			if tc.format == "pcm" {
-				assert.Equal(t, tc.data, recorder.Body.String())
+			assert.Equal(t, tc.contentType, recorder.Header().Get("Content-Type"))
+			assert.Equal(t, tc.data, recorder.Body.String())
+		})
+	}
+	for _, tc := range []struct {
+		name, format, data string
+		wantError          bool
+	}{
+		{"wav", "wav", "\x00\x80", false}, {"pcm", "pcm", "\x00\x80", false}, {"partial sample", "pcm", "\x80", true}, {"empty", "wav", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			headers := http.Header{"Content-Type": {"audio/pcm"}, "X-Sample-Rate": {"24000"}, "X-Sample-Format": {"s16le"}}
+			audio, err := pluginPCMResponse(headers, []byte(tc.data), tc.format)
+			if tc.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tc.format == "wav" {
+				assert.Equal(t, "RIFF", string(audio[:4]))
+				assert.Equal(t, tc.data, string(audio[44:]))
 			} else {
-				require.Len(t, recorder.Body.Bytes(), 46)
-				assert.Equal(t, "RIFF", recorder.Body.String()[:4])
-				assert.Equal(t, tc.data, recorder.Body.String()[44:])
+				assert.Equal(t, tc.data, string(audio))
 			}
 		})
 	}

@@ -416,10 +416,10 @@ func TestBreezeNativeSpeechUsesItsOwnModelAndTokenAllowlist(t *testing.T) {
 		name, contentType, path, body, model, input string
 		allowed, status                             int
 	}{
-		{"native single", "application/x-www-form-urlencoded", "/v1/audio/speech", "text=A%E6%B1%89&instruction=whisper", "breeze-tts", "A汉", 1, 204},
-		{"native batch", "application/x-www-form-urlencoded", "/v1/audio/speech/batch", "texts=%5B%22A%22%2C%22%E6%B1%89%22%5D", "breeze-tts", "A汉", 1, 204},
+		{"native single", "application/x-www-form-urlencoded", "/v1/audio/speech", "text=A%E6%B1%89&instruction=whisper", "breeze-tts-2", "A汉", 1, 204},
 		{"different native model", "application/x-www-form-urlencoded", "/v1/audio/speech", "model=tts-1&text=A", "", "", 1, 400},
-		{"recognizes native JSON text", "application/json", "/v1/audio/speech", `{"text":"A汉","instruction":"whisper"}`, "breeze-tts", "A汉", 1, 204},
+		{"recognizes native JSON text", "application/json", "/v1/audio/speech", `{"text":"A汉","instruction":"whisper"}`, "breeze-tts-2", "A汉", 1, 204},
+		{"object voice", "application/json", "/v1/audio/speech", `{"model":"breeze-tts-2","input":"A汉","voice":{"id":"narrator"}}`, "breeze-tts-2", "A汉", 1, 204},
 		{"leaves ambiguous OpenAI JSON", "application/json", "/v1/audio/speech", `{"input":"A"}`, "", "A", 1, 204},
 		{"explicit OpenAI model", "application/json", "/v1/audio/speech", `{"model":"tts-1","input":"A"}`, "tts-1", "A", 1, 204},
 		{"native denied", "application/x-www-form-urlencoded", "/v1/audio/speech", "text=A", "", "", 0, 403},
@@ -429,7 +429,7 @@ func TestBreezeNativeSpeechUsesItsOwnModelAndTokenAllowlist(t *testing.T) {
 			engine.POST(tc.path, func(c *gin.Context) {
 				defer common.CleanupBodyStorage(c)
 				common.SetContextKey(c, constant.ContextKeyTokenModelLimitEnabled, true)
-				common.SetContextKey(c, constant.ContextKeyTokenModelLimit, map[string]bool{"breeze-tts": tc.allowed == 1})
+				common.SetContextKey(c, constant.ContextKeyTokenModelLimit, map[string]bool{"breeze-tts-2": tc.allowed == 1})
 				c.Next()
 			}, NormalizeBreezeSpeech, func(c *gin.Context) {
 				if tc.allowed == 0 {

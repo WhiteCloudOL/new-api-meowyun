@@ -19,12 +19,7 @@ import (
 // input used by the speech relay, token allowlist and prepaid billing.
 func NormalizeBreezeSpeech(c *gin.Context) {
 	const model = relaycommon.BreezeSpeechModel
-	batch := c.Request.URL.Path == relaycommon.BreezeBatchPath
-	if _, ok := pluginruntime.DefaultRegistry.Generation().Get(model); !ok {
-		if batch {
-			abortWithOpenAiMessage(c, http.StatusNotFound, "BreezeTTS is unavailable")
-			return
-		}
+	if _, ok := pluginruntime.DefaultRegistry.Generation().Get(relaycommon.BreezePluginKey); !ok {
 		c.Next()
 		return
 	}
@@ -32,7 +27,7 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 	form := media == "multipart/form-data" || media == "application/x-www-form-urlencoded"
 
 	jsonBody := media == "application/json" || strings.HasSuffix(media, "+json")
-	if !form && !batch && !jsonBody {
+	if !form && !jsonBody {
 		c.Next()
 		return
 	}
@@ -78,7 +73,7 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 					return fmt.Errorf("invalid speech form")
 				}
 			}
-			for _, key := range []string{"model", "text", "texts", "instruction", "cfg_scale", "ref_text", "seed", "max_new_tokens"} {
+			for _, key := range []string{"model", "text", "instruction", "voice_id", "cfg_scale", "ref_text", "seed", "max_new_tokens", "temperature", "top_k", "top_p", "repetition_penalty", "split_chars"} {
 				values := fields[key]
 				if len(values) > 1 {
 					return fmt.Errorf("speech field %q must appear only once", key)
@@ -88,7 +83,7 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 				}
 			}
 			body["response_format"] = "pcm"
-			body["breeze_native_pcm"] = !batch
+			body["breeze_native_pcm"] = true
 		} else {
 			raw, err := storage.Bytes()
 			if err != nil {
@@ -98,16 +93,31 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 				return fmt.Errorf("invalid speech JSON object")
 			}
 		}
-		if !form && !batch {
-			// A native text field is unambiguous. Leave OpenAI requests and
-			// explicitly named models on their existing routing path.
-			text, native := body["text"].(string)
-			if !native || body["input"] != nil || body["model"] != nil && body["model"] != "" {
-				return nil
+		if !form {
+			// Only this model accepts the vendor's object-shaped voice field.
+			// Normalize it before the host's string-shaped speech DTO is parsed.
+			if name, _ := body["model"].(string); strings.EqualFold(name, model) && body["input"] != nil {
+				voice, object := body["voice"].(map[string]any)
+				if !object {
+					return nil
+				}
+				id, ok := voice["id"].(string)
+				if !ok {
+					return fmt.Errorf("voice id must be a string")
+				}
+				body["voice"] = id
+			} else {
+				// A native text field identifies Breeze; explicitly different models
+				// stay on their own routing path.
+				text, native := body["text"].(string)
+				name, _ := body["model"].(string)
+				if !native || body["input"] != nil || name != "" && !strings.EqualFold(name, model) {
+					return nil
+				}
+				body["input"] = text
+				body["response_format"] = "pcm"
+				body["breeze_native_pcm"] = true
 			}
-			body["input"] = text
-			body["response_format"] = "pcm"
-			body["breeze_native_pcm"] = true
 		}
 		name, modelIsString := body["model"].(string)
 		if body["model"] != nil && !modelIsString {
@@ -117,28 +127,7 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 			return fmt.Errorf("native BreezeTTS synthesis requires model %s", model)
 		}
 		body["model"] = model
-		if batch {
-			var texts []string
-			raw, ok := body["texts"].(string)
-			if !ok {
-				encoded, err := common.Marshal(body["texts"])
-				if err != nil {
-					return err
-				}
-				raw = string(encoded)
-			}
-			if len(raw) > 128<<10 || common.UnmarshalJsonStr(raw, &texts) != nil || len(texts) == 0 || len(texts) > 128 {
-				return fmt.Errorf("texts must contain 1 to 128 strings")
-			}
-			for _, text := range texts {
-				if strings.TrimSpace(text) == "" {
-					return fmt.Errorf("texts must contain non-empty strings")
-				}
-			}
-			body["texts"] = texts
-			body["input"] = strings.Join(texts, "")
-			body["response_format"] = "pcm"
-		} else if body["input"] == nil {
+		if body["input"] == nil {
 			body["input"] = body["text"]
 		}
 		encoded, err := common.Marshal(body)
@@ -168,11 +157,11 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 // regular model allowlist and channel selector.
 func SelectBreezeMetadataModel(c *gin.Context) {
 	const model = relaycommon.BreezeSpeechModel
-	if _, ok := pluginruntime.DefaultRegistry.Generation().Get(model); !ok {
+	if _, ok := pluginruntime.DefaultRegistry.Generation().Get(relaycommon.BreezePluginKey); !ok {
 		abortWithOpenAiMessage(c, http.StatusNotFound, "BreezeTTS is unavailable")
 		return
 	}
 	c.Set("resolved_task_model", model)
-	c.Set("expected_task_plugin_key", model)
+	c.Set("expected_task_plugin_key", relaycommon.BreezePluginKey)
 	c.Next()
 }

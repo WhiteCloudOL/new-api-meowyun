@@ -212,30 +212,27 @@ func (a *AudioAdaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.Rel
 	if _, err = a.GetRequestURL(info); err != nil {
 		return nil, err
 	}
-	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" && descriptor.ResponseType != "pcm" && descriptor.ResponseType != "pcm_batch" && descriptor.ResponseType != "pcm_stream" && !(a.nativeRoute != nil && descriptor.ResponseType == "sse") {
+	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" && descriptor.ResponseType != "pcm" && descriptor.ResponseType != "pcm_batch" && descriptor.ResponseType != "pcm_stream" && descriptor.ResponseType != "audio_stream" && descriptor.ResponseType != "sse" {
 		return nil, fmt.Errorf("plugin returned unsupported speech response type")
+	}
+	if a.plugin.Meta.Key == relaycommon.BreezePluginKey {
+		fields, ok := descriptor.Body.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("BreezeTTS speech body must be an object")
+		}
+		field := "input"
+		if descriptor.BodyEncoding == "form" || descriptor.BodyEncoding == "multipart" {
+			field = "text"
+		}
+		if fields[field] != audioRequest.Input {
+			return nil, fmt.Errorf("BreezeTTS upstream text must match the billed input")
+		}
 	}
 	if descriptor.BodyEncoding == "form" || descriptor.BodyEncoding == "multipart" {
 		fields, ok := descriptor.Body.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("plugin speech form must be an object")
 		}
-		if pinned.Model == relaycommon.BreezeSpeechModel {
-			billedText, _ := fields["text"].(string)
-			if pinned.Operation.Name == "batch" {
-				var texts []string
-				raw, _ := fields["texts"].(string)
-				if common.UnmarshalJsonStr(raw, &texts) != nil || len(texts) == 0 || len(texts) > 128 || descriptor.ResponseType != "pcm_batch" {
-					return nil, fmt.Errorf("invalid BreezeTTS batch")
-				}
-				billedText = strings.Join(texts, "")
-				a.segmentCount = len(texts)
-			}
-			if billedText != audioRequest.Input {
-				return nil, fmt.Errorf("BreezeTTS upstream text must match the billed input")
-			}
-		}
-
 		form := make(url.Values, len(fields))
 		for key, value := range fields {
 			text, ok := value.(string)
@@ -296,12 +293,12 @@ func (a *AudioAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bo
 	originalMethod := c.Request.Method
 	c.Request.Method = http.MethodPost
 	defer func() { c.Request.Method = originalMethod }()
-	if a.request.ResponseType == "sse" {
+	if a.request != nil && a.request.ResponseType == "sse" {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 5*time.Minute)
 		a.cancel = cancel
 		return channel.DoApiRequestWithContext(ctx, a, c, info, body)
 	}
-	if a.request.ResponseType == "pcm" || a.request.ResponseType == "pcm_batch" || a.request.ResponseType == "pcm_stream" {
+	if a.request.ResponseType == "pcm" || a.request.ResponseType == "pcm_batch" || a.request.ResponseType == "pcm_stream" || a.request.ResponseType == "audio_stream" {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Minute)
 		a.cancel = cancel
 		return channel.DoApiRequestWithContext(ctx, a, c, info, body)
@@ -311,19 +308,23 @@ func (a *AudioAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bo
 
 func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (any, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
-	if a.nativeRoute != nil && a.request.ResponseType == "sse" && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+	if a.request != nil && a.request.ResponseType == "sse" {
+		if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+			return nil, pluginAudioResponseError(fmt.Errorf("upstream did not return speech SSE"))
+		}
 		return a.readNativeStream(c, resp, info)
 	}
 	batch := a.request != nil && a.request.ResponseType == "pcm_batch"
 	streamPCM := a.request != nil && a.request.ResponseType == "pcm_stream"
+	streamAudio := a.request != nil && a.request.ResponseType == "audio_stream"
 	rawPCM := a.request != nil && (a.request.ResponseType == "pcm" || batch || streamPCM)
 	limit := maxPluginAudioResponseBytes
-	if rawPCM || a.nativeRoute != nil {
+	if rawPCM || streamAudio || a.nativeRoute != nil {
 		limit = defaultPluginAudioBytes
 	}
 	var body []byte
 	var err error
-	if !streamPCM {
+	if !streamPCM && !streamAudio {
 		body, err = io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 		if err != nil || len(body) > limit {
 			if err == nil {
@@ -333,7 +334,7 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 		}
 	}
 	var responseBody any
-	if !rawPCM {
+	if !rawPCM && !streamAudio {
 		responseBody = string(body)
 		var decoded any
 		if common.Unmarshal(body, &decoded) == nil {
@@ -380,18 +381,25 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 	if format == "" {
 		format = strings.ToLower(strings.TrimSpace(a.format))
 	}
-	if streamPCM {
-		if format != "pcm" {
+	if streamPCM || streamAudio {
+		if streamPCM && format != "pcm" {
 			return nil, pluginAudioResponseError(fmt.Errorf("streaming audio requires PCM output"))
 		}
+		contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		if streamAudio && contentType != "audio/mpeg" && contentType != "audio/wav" && contentType != "audio/pcm" {
+			return nil, pluginAudioResponseError(fmt.Errorf("upstream returned unsupported streaming audio content type"))
+		}
 		var first [2]byte
-		if _, err := pluginPCMResponse(resp.Header, first[:], format); err != nil {
-			return nil, pluginAudioResponseError(err)
+		if streamPCM || contentType == "audio/pcm" {
+			if _, err := pluginPCMResponse(resp.Header, first[:], "pcm"); err != nil {
+				return nil, pluginAudioResponseError(err)
+			}
+			contentType = "audio/pcm"
 		}
 		if _, err := io.ReadFull(resp.Body, first[:]); err != nil {
 			return nil, pluginAudioResponseError(err)
 		}
-		c.Header("Content-Type", "audio/pcm")
+		c.Header("Content-Type", contentType)
 		c.Header("Cache-Control", "no-store")
 		for _, name := range []string{"X-Sample-Rate", "X-Sample-Format", "X-Queue-Wait-Ms"} {
 			c.Header(name, resp.Header.Get(name))

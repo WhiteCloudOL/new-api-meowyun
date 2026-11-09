@@ -114,7 +114,6 @@ var hostProtocols = []HostProtocolDefinition{
 	}},
 	{Name: "openai_audio_speech", Operations: []HostProtocolOperation{
 		{Name: "create", Methods: []string{http.MethodPost}, Path: "/v1/audio/speech", BodyKinds: []BodyKind{BodyJSON}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest", "buildRequest", "parseResponse"}},
-		{Name: "batch", Methods: []string{http.MethodPost}, Path: "/v1/audio/speech/batch", BodyKinds: []BodyKind{BodyJSON}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest", "buildRequest", "parseResponse"}},
 	}},
 	// The OpenAI Images API is synchronous: both operations create a task and
 	// the host answers with the rendered image response once the task is

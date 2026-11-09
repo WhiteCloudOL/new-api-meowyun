@@ -53,8 +53,8 @@ func TestCharacterSpeechReservesActualInput(t *testing.T) {
 	constant.CountToken = false
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"qwen3-tts-flash":2}`))
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode":    `{"cosyvoice-v3-flash":"tiered_expr","breeze-tts":"tiered_expr"}`,
-		"billing_setting.billing_expr":    `{"cosyvoice-v3-flash":"tier(\"characters\", p * 4)","breeze-tts":"tier(\"characters\", p * 4)"}`,
+		"billing_setting.billing_mode":    `{"cosyvoice-v3-flash":"tiered_expr","breeze-tts-2":"tiered_expr"}`,
+		"billing_setting.billing_expr":    `{"cosyvoice-v3-flash":"tier(\"characters\", p * 4)","breeze-tts-2":"tier(\"characters\", p * 4)"}`,
 		"group_ratio_setting.group_ratio": `{"default":1}`,
 	}))
 	// A discounted optional estimate must not admit underfunded known input.
@@ -146,7 +146,7 @@ func TestTieredZeroBalanceAdmission(t *testing.T) {
 			expr, err := common.Marshal(map[string]string{modelName: tc.expr})
 			require.NoError(t, err)
 			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-				"billing_setting.billing_mode":    `{"breeze-tts":"tiered_expr","zero-price-fixture":"tiered_expr"}`,
+				"billing_setting.billing_mode":    `{"breeze-tts-2":"tiered_expr","zero-price-fixture":"tiered_expr"}`,
 				"billing_setting.billing_expr":    string(expr),
 				"group_ratio_setting.group_ratio": `{"default":1,"retry":2}`,
 			}))
