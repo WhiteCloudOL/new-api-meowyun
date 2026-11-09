@@ -38,14 +38,16 @@ import { ModelPriceCell, type ModelPriceCellOptions } from './model-price-cell'
 // Pricing Table Columns
 // ----------------------------------------------------------------------------
 
-export type PricingColumnsOptions = ModelPriceCellOptions
+export type PricingColumnsOptions = ModelPriceCellOptions & {
+  hideVendor?: boolean
+}
 
 export function usePricingColumns(
   options: PricingColumnsOptions = {}
 ): ColumnDef<PricingModel>[] {
   const { t } = useTranslation()
 
-  return [
+  const columns: ColumnDef<PricingModel>[] = [
     // Model column
     {
       accessorKey: 'model_name',
@@ -201,4 +203,10 @@ export function usePricingColumns(
       enableSorting: false,
     },
   ]
+  return options.hideVendor
+    ? columns.filter(
+        (column) =>
+          !('accessorKey' in column) || column.accessorKey !== 'vendor_name'
+      )
+    : columns
 }

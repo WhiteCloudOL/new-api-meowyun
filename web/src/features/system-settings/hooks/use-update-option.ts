@@ -28,6 +28,7 @@ import type { UpdateOptionRequest, UpdatePasskeyDomainsRequest } from '../types'
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
+  'general_setting.hide_upstream_info',
   'HeaderNavModules',
   'SidebarModulesAdmin',
   'Notice',
@@ -70,6 +71,9 @@ export function useUpdateOption() {
           } catch {
             /* empty */
           }
+        }
+        if (variables.key === 'general_setting.hide_upstream_info') {
+          queryClient.invalidateQueries({ queryKey: ['pricing'] })
         }
 
         toast.success(i18next.t('Setting updated successfully'))

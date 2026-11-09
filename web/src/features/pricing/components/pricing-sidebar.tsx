@@ -293,12 +293,14 @@ export const PricingSidebar = memo(function PricingSidebar(
           options={groupOptions}
           onChange={props.onGroupChange}
         />
-        <FilterSection
-          title={t('All Vendors')}
-          value={props.vendorFilter}
-          options={vendorOptions}
-          onChange={props.onVendorChange}
-        />
+        {props.vendors.length > 0 && (
+          <FilterSection
+            title={t('All Vendors')}
+            value={props.vendorFilter}
+            options={vendorOptions}
+            onChange={props.onVendorChange}
+          />
+        )}
         <FilterSection
           title={t('Model Tags')}
           value={props.tagFilter}

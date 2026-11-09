@@ -54,6 +54,7 @@ const MODELS_SECTIONS = [
             ),
           },
           general_setting: {
+            hide_upstream_info: settings['general_setting.hide_upstream_info'],
             ping_interval_enabled:
               settings['general_setting.ping_interval_enabled'],
             ping_interval_seconds:

@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -57,6 +60,30 @@ func GetPricing(c *gin.Context) {
 
 	usableGroup = service.GetUserUsableGroups(group)
 	pricing = filterPricingByUsableGroups(pricing, usableGroup)
+	vendors := model.GetVendors()
+	hideUpstream := operation_setting.GetGeneralSetting().HideUpstreamInfo && c.GetInt("role") < common.RoleAdminUser
+	if hideUpstream {
+		identities := make([]string, 0, len(vendors))
+		for _, vendor := range vendors {
+			identities = append(identities, vendor.Name)
+		}
+		// Pricing is cached. Redact only the detached public projection.
+		pricing = slices.Clone(pricing)
+		for i := range pricing {
+			item := &pricing[i]
+			item.VendorID, item.Icon, item.OwnerBy = 0, "", "new-api"
+			item.Description = common.RedactProviderText(item.Description, identities...)
+			item.Tags = common.RedactProviderText(item.Tags, identities...)
+			item.BillingPluginVariants = slices.Clone(item.BillingPluginVariants)
+			for j := range item.BillingPluginVariants {
+				variant := &item.BillingPluginVariants[j]
+				variant.PluginKey = fmt.Sprintf("provider-%d", j+1)
+				variant.PluginName = fmt.Sprintf("Provider %d", j+1)
+				variant.Icon = ""
+			}
+		}
+		vendors = []model.PricingVendor{}
+	}
 	// check groupRatio contains usableGroup
 	for group := range ratio_setting.GetGroupRatioCopy() {
 		if _, ok := usableGroup[group]; !ok {
@@ -67,7 +94,8 @@ func GetPricing(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"success":            true,
 		"data":               pricing,
-		"vendors":            model.GetVendors(),
+		"vendors":            vendors,
+		"hide_upstream_info": hideUpstream,
 		"group_ratio":        groupRatio,
 		"usable_group":       usableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),

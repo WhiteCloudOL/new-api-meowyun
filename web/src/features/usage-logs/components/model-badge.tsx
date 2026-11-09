@@ -30,6 +30,8 @@ import {
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { resolveModelProvider } from '@/lib/model-provider'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { isResponseModelMismatch } from '../lib/response-model'
 import type { LogOtherData } from '../types'
@@ -45,7 +47,12 @@ interface ModelBadgeProps {
 }
 
 function ModelBadgeContent(props: ModelBadgeProps & { copyable: boolean }) {
-  const provider = resolveModelProvider(props.modelName)
+  const hideUpstreamInfo = useSystemConfigStore(
+    (state) => state.config.hideUpstreamInfo === true
+  )
+  const isAdmin = useAuthStore((state) => (state.auth.user?.role ?? 0) >= 10)
+  const provider =
+    hideUpstreamInfo && !isAdmin ? null : resolveModelProvider(props.modelName)
 
   return (
     <StatusBadge

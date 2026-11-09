@@ -96,6 +96,7 @@ export function mapStatusDataToConfig(
     logo: (data.logo as string | undefined) || DEFAULT_LOGO,
     footerHtml: data.footer_html as string | undefined,
     demoSiteEnabled: data.demo_site_enabled as boolean | undefined,
+    hideUpstreamInfo: data.hide_upstream_info === true,
     displayTokenStatEnabled: data.display_token_stat_enabled as
       | boolean
       | undefined,

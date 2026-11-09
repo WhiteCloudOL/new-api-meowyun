@@ -55,6 +55,7 @@ export function usePricingData(enabled = true) {
         : undefined
       return {
         ...model,
+        hide_upstream_info: data.hide_upstream_info,
         key: model.model_name,
         vendor_name: vendor?.name,
         vendor_icon: vendor?.icon,

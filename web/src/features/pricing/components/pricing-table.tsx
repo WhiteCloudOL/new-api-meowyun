@@ -61,6 +61,7 @@ export function PricingTable(props: PricingTableProps) {
   })
 
   const columns = usePricingColumns({
+    hideVendor: props.models.some((model) => model.hide_upstream_info === true),
     tokenUnit,
     priceRate,
     usdExchangeRate,

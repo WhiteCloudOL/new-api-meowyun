@@ -62,6 +62,11 @@ function toolbarProps(): PricingToolbarProps {
 }
 
 describe('pricing controls', () => {
+  it('hides the vendor filter when provider information is withheld', () => {
+    render(<PricingSidebar {...toolbarProps()} />)
+    expect(screen.queryByText('All Vendors')).not.toBeInTheDocument()
+    expect(screen.getByText('Groups')).toBeInTheDocument()
+  })
   it.each<{
     name: string
     pricing: Partial<PricingModel>

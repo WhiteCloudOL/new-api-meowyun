@@ -12,11 +12,48 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
 )
+
+// ClientRelayError projects an error for downstream callers without modifying
+// the original error used by retry decisions, billing and administrator logs.
+func ClientRelayError(c *gin.Context, apiError *types.NewAPIError) *types.NewAPIError {
+	if apiError == nil || !operation_setting.GetGeneralSetting().HideUpstreamInfo {
+		return apiError
+	}
+	message := apiError.Error()
+	code := apiError.GetErrorCode()
+	upstream := apiError.GetErrorType() != types.ErrorTypeNewAPIError
+	switch code {
+	case types.ErrorCodeBadResponseStatusCode, types.ErrorCodeBadResponse, types.ErrorCodeBadResponseBody,
+		types.ErrorCodeReadResponseBodyFailed, types.ErrorCodeDoRequestFailed, types.ErrorCodeAwsInvokeError:
+		upstream = true
+	}
+	if upstream {
+		message = common.UpstreamFailureMessage
+		code = types.ErrorCodeBadResponseStatusCode
+	} else {
+		if c == nil {
+			message = common.RedactProviderText(message)
+		} else {
+			message = common.RedactProviderText(message,
+				common.GetContextKeyString(c, constant.ContextKeyChannelName),
+				constant.GetChannelTypeName(common.GetContextKeyInt(c, constant.ContextKeyChannelType)))
+		}
+	}
+	if upstream && c != nil {
+		if requestID := c.GetString(common.RequestIdKey); requestID != "" {
+			message = common.MessageWithRequestId(message, requestID)
+		}
+	}
+	return types.NewErrorWithStatusCode(errors.New(message), code, apiError.StatusCode)
+}
 
 func MidjourneyErrorWrapper(code int, desc string) *taskdto.MidjourneyResponse {
 	return &taskdto.MidjourneyResponse{

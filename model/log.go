@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -115,6 +116,13 @@ func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].ChannelName = ""
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
+		if operation_setting.GetGeneralSetting().HideUpstreamInfo {
+			logs[i].ChannelId = 0
+			logs[i].UpstreamRequestId = ""
+			if logs[i].Type == LogTypeError {
+				logs[i].Content = common.GetJsonString([]*common.Message{common.NewMessage(common.UpstreamFailureMessage)})
+			}
+		}
 	}
 	assignDisplayLogIds(logs, startIdx)
 }

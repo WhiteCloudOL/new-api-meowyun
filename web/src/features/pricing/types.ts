@@ -56,6 +56,7 @@ export type BillingPluginVariant = {
 }
 
 export type PricingModel = {
+  hide_upstream_info?: boolean
   billing_plugin_variants?: BillingPluginVariant[]
   id: number
   model_name: string
@@ -122,6 +123,7 @@ export type ModelCapability =
   | 'embeddings'
 
 export type PricingData = {
+  hide_upstream_info?: boolean
   success: boolean
   message?: string
   data: PricingModel[]

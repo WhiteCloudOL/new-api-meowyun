@@ -175,6 +175,9 @@ func buildOpenAIModel(modelName string, ownerByModel map[string]string) dto.Open
 	if owner, ok := ownerByModel[modelName]; ok && owner != "" {
 		oaiModel.OwnedBy = owner
 	}
+	if operation_setting.GetGeneralSetting().HideUpstreamInfo {
+		oaiModel.OwnedBy = "new-api"
+	}
 	oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(modelName)
 	return oaiModel
 }
@@ -348,6 +351,9 @@ func EnabledListModels(c *gin.Context) {
 func RetrieveModel(c *gin.Context, modelType int) {
 	modelId := c.Param("model")
 	if aiModel, ok := openAIModelsMap[modelId]; ok {
+		if operation_setting.GetGeneralSetting().HideUpstreamInfo {
+			aiModel.OwnedBy = "new-api"
+		}
 		switch modelType {
 		case constant.ChannelTypeAnthropic:
 			c.JSON(200, dto.AnthropicModel{

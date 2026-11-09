@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
 const (
@@ -244,6 +245,14 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility) string {
 
 	changed := false
 	if visibility == logOtherVisibilityUser {
+		if operation_setting.GetGeneralSetting().HideUpstreamInfo {
+			for _, key := range []string{"task_plugin", "upstream_model_name", "response_model", "response_model_name", "upstream_request_id", "error_type", "error_code", logOtherContentPartsKey} {
+				if _, exists := values[key]; exists {
+					delete(values, key)
+					changed = true
+				}
+			}
+		}
 		for _, key := range []string{logOtherAdminInfoKey, logOtherRootInfoKey, logOtherAuditInfoKey} {
 			if _, exists := values[key]; exists {
 				delete(values, key)

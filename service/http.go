@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,6 +39,17 @@ func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
 		}
 		return false
 	}
+	if operation_setting.GetGeneralSetting().HideUpstreamInfo {
+		// Preserve transport and media semantics without forwarding provider
+		// branding, diagnostic links, cookies or infrastructure headers.
+		switch strings.ToLower(k) {
+		case "content-type", "content-encoding", "cache-control", "expires", "last-modified", "etag",
+			"content-range", "accept-ranges", "retry-after", "x-sample-rate", "x-sample-format", "x-queue-wait-ms", "x-segment-bytes":
+			return true
+		default:
+			return false
+		}
+	}
 	return true
 }
 
@@ -46,6 +58,7 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 		return
 	}
 
+	data = ClientResponseJSON(data)
 	body := io.NopCloser(bytes.NewBuffer(data))
 
 	// We shouldn't set the header before we parse the response body, because the parse part may fail.
@@ -76,4 +89,11 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 		logger.LogError(c, common.LogText("failed to copy response body: %s", err.Error()))
 	}
 	c.Writer.Flush()
+}
+
+func ClientResponseJSON(data []byte) []byte {
+	if !operation_setting.GetGeneralSetting().HideUpstreamInfo {
+		return data
+	}
+	return common.RedactProviderMetadata(data)
 }

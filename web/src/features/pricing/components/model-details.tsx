@@ -1017,14 +1017,16 @@ function GroupPricingSection(props: GroupPricingSectionProps) {
               value={variant.plugin_key}
               className='max-w-full min-w-0'
             >
-              <PluginIcon
-                plugin={{
-                  key: variant.plugin_key,
-                  name: variant.plugin_name,
-                  icon: variant.icon,
-                }}
-                size={16}
-              />
+              {!props.model.hide_upstream_info && (
+                <PluginIcon
+                  plugin={{
+                    key: variant.plugin_key,
+                    name: variant.plugin_name,
+                    icon: variant.icon,
+                  }}
+                  size={16}
+                />
+              )}
               <span className='truncate' title={variant.plugin_name}>
                 {variant.plugin_name}
               </span>

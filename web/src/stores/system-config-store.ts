@@ -43,6 +43,7 @@ export interface SystemConfig {
   logo: string
   footerHtml?: string
   demoSiteEnabled?: boolean
+  hideUpstreamInfo?: boolean
   displayTokenStatEnabled?: boolean
   currency: CurrencyConfig
 }

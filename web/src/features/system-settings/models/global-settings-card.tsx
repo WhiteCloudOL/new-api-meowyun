@@ -94,6 +94,7 @@ const schema = z.object({
     chat_completions_to_responses_policy: jsonString,
   }),
   general_setting: z.object({
+    hide_upstream_info: z.boolean(),
     ping_interval_enabled: z.boolean(),
     ping_interval_seconds: z.coerce.number().min(1),
   }),
@@ -106,6 +107,7 @@ type FlatGlobalModelSettings = {
   'global.pass_through_request_enabled': boolean
   'global.thinking_model_blacklist': string
   'global.chat_completions_to_responses_policy': string
+  'general_setting.hide_upstream_info': boolean
   'general_setting.ping_interval_enabled': boolean
   'general_setting.ping_interval_seconds': number
 }
@@ -123,6 +125,8 @@ const flattenGlobalValues = (
     values.global.chat_completions_to_responses_policy,
     '{}'
   ),
+  'general_setting.hide_upstream_info':
+    values.general_setting.hide_upstream_info,
   'general_setting.ping_interval_enabled':
     values.general_setting.ping_interval_enabled,
   'general_setting.ping_interval_seconds':
@@ -261,6 +265,30 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
               </AlertDescription>
             </Alert>
 
+            <FormField
+              control={form.control}
+              name='general_setting.hide_upstream_info'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>
+                      {t('Hide upstream provider information')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Hide provider names and links in downstream responses and user pages. Administrator diagnostics remain available.'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
             <FormField
               control={form.control}
               name='global.chat_completions_to_responses_policy'
