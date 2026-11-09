@@ -3050,6 +3050,7 @@ func TestBreezeSpeechAdaptor(t *testing.T) {
 		{name: "native voice and zero sampling", body: map[string]any{"input": "A汉&", "breeze_native_pcm": true, "voice_id": "narrator", "instruction": "Slow & clear", "temperature": "0", "top_k": "0", "top_p": "0", "repetition_penalty": "0", "max_new_tokens": "0", "split_chars": "0", "seed": "-1"}, contentType: "audio/pcm", data: "\x00\x80", responseType: "pcm_stream"},
 		{name: "OpenAI defaults to MP3", body: map[string]any{"input": "A汉&", "voice": "narrator", "instructions": "Slow & clear"}, contentType: "audio/mpeg", data: "\xff\xfbMP3", responseType: "audio_stream"},
 		{name: "OpenAI WAV fallback", body: map[string]any{"input": "A汉&", "response_format": "opus"}, contentType: "audio/wav", data: "RIFFtestWAVE", responseType: "audio_stream"},
+		{name: "OpenAI PCM without sample format header", body: map[string]any{"input": "A汉&", "response_format": "pcm"}, contentType: "audio/pcm", data: "\x00\x80", responseType: "audio_stream"},
 		{name: "OpenAI SSE", body: map[string]any{"input": "A汉&", "response_format": "pcm", "stream_format": "sse"}, contentType: "text/event-stream", data: "data: {\"type\":\"speech.audio.delta\",\"audio\":\"AIA=\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"total_tokens\":0}}\n\n", responseType: "sse"},
 		{name: "unbounded frame cap", body: map[string]any{"input": "A汉&", "max_new_tokens": 1501}, wantError: "max_new_tokens is out of range"},
 		{name: "negative top k", body: map[string]any{"input": "A汉&", "top_k": -1}, wantError: "top_k is out of range"},
@@ -3100,6 +3101,9 @@ func TestBreezeSpeechAdaptor(t *testing.T) {
 			_, err = adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{Model: modelName, Input: "different"})
 			require.ErrorContains(t, err, "must match the billed input")
 			response := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.contentType}, "X-Sample-Rate": {"24000"}, "X-Sample-Format": {"s16le"}}, Body: io.NopCloser(strings.NewReader(tc.data))}
+			if tc.name == "OpenAI PCM without sample format header" {
+				response.Header.Del("X-Sample-Format")
+			}
 			usage, apiErr := adaptor.DoResponse(ctx, response, info)
 			require.Nil(t, apiErr)
 			assert.Equal(t, 4, usage.(*dto.Usage).PromptTokens)

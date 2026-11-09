@@ -391,7 +391,14 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 		}
 		var first [2]byte
 		if streamPCM || contentType == "audio/pcm" {
-			if _, err := pluginPCMResponse(resp.Header, first[:], "pcm"); err != nil {
+			pcmHeaders := resp.Header
+			if streamAudio && a.plugin.Meta.Key == relaycommon.BreezePluginKey && pcmHeaders.Get("X-Sample-Format") == "" {
+				// The cpp OpenAI encoder emits s16le but only its native form
+				// endpoint sends X-Sample-Format. Keep other PCM checks strict.
+				pcmHeaders = pcmHeaders.Clone()
+				pcmHeaders.Set("X-Sample-Format", "s16le")
+			}
+			if _, err := pluginPCMResponse(pcmHeaders, first[:], "pcm"); err != nil {
 				return nil, pluginAudioResponseError(err)
 			}
 			contentType = "audio/pcm"
@@ -403,6 +410,9 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 		c.Header("Cache-Control", "no-store")
 		for _, name := range []string{"X-Sample-Rate", "X-Sample-Format", "X-Queue-Wait-Ms"} {
 			c.Header(name, resp.Header.Get(name))
+		}
+		if contentType == "audio/pcm" {
+			c.Header("X-Sample-Format", "s16le")
 		}
 		reader := io.LimitReader(io.MultiReader(bytes.NewReader(first[:]), resp.Body), int64(limit))
 		buffer := make([]byte, 16<<10)
