@@ -11,10 +11,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -26,7 +28,7 @@ func BreezeSpeechMetadata(c *gin.Context) {
 	base := strings.TrimRight(common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl), "/")
 	key := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
 	if c.GetString("task_plugin_key") != relaycommon.BreezePluginKey || base == "" || key == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "BreezeTTS channel is unavailable"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": i18n.T(c, i18n.MsgSpeechServiceUnavailable)})
 		return
 	}
 	path := c.FullPath()
@@ -40,7 +42,7 @@ func BreezeSpeechMetadata(c *gin.Context) {
 	}
 	target := strings.TrimSuffix(base, "/v1") + path
 	fail := func() {
-		c.JSON(http.StatusBadGateway, gin.H{"detail": "BreezeTTS metadata request failed"})
+		c.JSON(http.StatusBadGateway, gin.H{"detail": i18n.T(c, i18n.MsgUpstreamFailure)})
 	}
 	if err := pluginruntime.ValidateRequestURL(target, base, nil); err != nil {
 		fail()
@@ -103,5 +105,9 @@ func BreezeSpeechMetadata(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
+	if resp.StatusCode >= http.StatusBadRequest && operation_setting.GetGeneralSetting().HideUpstreamInfo {
+		c.JSON(resp.StatusCode, gin.H{"detail": i18n.T(c, i18n.MsgUpstreamFailure)})
+		return
+	}
 	c.Data(resp.StatusCode, "application/json", body)
 }

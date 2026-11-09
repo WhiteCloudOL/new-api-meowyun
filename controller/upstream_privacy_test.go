@@ -2,12 +2,14 @@ package controller
 
 import (
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -17,6 +19,39 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUpstreamPrivacyVoiceLibraryError(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	setting := operation_setting.GetGeneralSetting()
+	previous := setting.HideUpstreamInfo
+	t.Cleanup(func() { setting.HideUpstreamInfo = previous })
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, err := w.Write([]byte(`{"detail":"PrivateProvider: visit https://provider.example/help"}`))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(upstream.Close)
+	for _, hidden := range []bool{false, true} {
+		setting.HideUpstreamInfo = hidden
+		engine := gin.New()
+		engine.GET("/v1/voices/:voice_id", func(c *gin.Context) {
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, upstream.URL+"/v1")
+			common.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
+			c.Set("task_plugin_key", "breeze-tts")
+		}, BreezeSpeechMetadata)
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest("GET", "/v1/voices/missing", nil)
+		request.Header.Set("Accept-Language", "en")
+		engine.ServeHTTP(recorder, request)
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		if hidden {
+			assert.JSONEq(t, `{"detail":"The upstream service could not complete the request"}`, recorder.Body.String())
+		} else {
+			assert.Contains(t, recorder.Body.String(), "PrivateProvider")
+		}
+	}
+}
 
 func TestUpstreamPrivacyPublicResponses(t *testing.T) {
 	setting := operation_setting.GetGeneralSetting()

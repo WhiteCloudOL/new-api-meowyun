@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,7 @@ import (
 )
 
 func TestBreezeVoiceLibraryTransport(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	for _, tc := range []struct {
 		name, method, path, body string
 		status                   int

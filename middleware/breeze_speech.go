@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
@@ -124,7 +126,7 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 			return fmt.Errorf("model must be a string")
 		}
 		if name != "" && !strings.EqualFold(name, model) {
-			return fmt.Errorf("native BreezeTTS synthesis requires model %s", model)
+			return errors.New(i18n.T(c, i18n.MsgNativeSpeechModelRequired, map[string]any{"Model": model}))
 		}
 		body["model"] = model
 		if body["input"] == nil {
@@ -158,7 +160,7 @@ func NormalizeBreezeSpeech(c *gin.Context) {
 func SelectBreezeMetadataModel(c *gin.Context) {
 	const model = relaycommon.BreezeSpeechModel
 	if _, ok := pluginruntime.DefaultRegistry.Generation().Get(relaycommon.BreezePluginKey); !ok {
-		abortWithOpenAiMessage(c, http.StatusNotFound, "BreezeTTS is unavailable")
+		abortWithOpenAiMessage(c, http.StatusNotFound, i18n.T(c, i18n.MsgSpeechServiceUnavailable))
 		return
 	}
 	c.Set("resolved_task_model", model)

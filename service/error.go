@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -36,7 +37,7 @@ func ClientRelayError(c *gin.Context, apiError *types.NewAPIError) *types.NewAPI
 		upstream = true
 	}
 	if upstream {
-		message = common.UpstreamFailureMessage
+		message = i18n.T(c, i18n.MsgUpstreamFailure)
 		code = types.ErrorCodeBadResponseStatusCode
 	} else {
 		if c == nil {
