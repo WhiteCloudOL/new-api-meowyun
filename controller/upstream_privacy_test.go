@@ -54,6 +54,7 @@ func TestUpstreamPrivacyVoiceLibraryError(t *testing.T) {
 }
 
 func TestUpstreamPrivacyPublicResponses(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	setting := operation_setting.GetGeneralSetting()
 	previous := setting.HideUpstreamInfo
 	t.Cleanup(func() { setting.HideUpstreamInfo = previous })
@@ -85,7 +86,7 @@ func TestUpstreamPrivacyPublicResponses(t *testing.T) {
 				assert.Equal(t, "PrivateProvider", meta.OwnedBy)
 			}
 			input := []byte(`{"id":"unchanged","model":"client-model","provider":"PrivateProvider","provider_url":"https://provider.example","usage":{"prompt_tokens":9223372036854775806},"choices":[{"message":{"content":"Read https://reference.example in the answer"}}]}`)
-			projected := service.ClientResponseJSON(input)
+			projected := service.ClientResponseJSON(ctx, input)
 			if hidden {
 				assert.NotContains(t, string(projected), "PrivateProvider")
 				assert.NotContains(t, string(projected), "provider.example")
@@ -103,6 +104,42 @@ func TestUpstreamPrivacyPublicResponses(t *testing.T) {
 			assert.Contains(t, recorder.Body.String(), "https://reference.example")
 		})
 	}
+}
+
+func TestUpstreamPrivacyNativeErrorFrames(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	setting := operation_setting.GetGeneralSetting()
+	previous := setting.HideUpstreamInfo
+	t.Cleanup(func() { setting.HideUpstreamInfo = previous })
+	for _, tc := range []struct{ name, input, expected string }{
+		{"openai", `{"error":{"message":"PrivateProvider https://provider.example/help","type":"private_error","param":"provider.example","code":"PrivateProvider"}}`, `{"error":{"message":"The upstream service could not complete the request","type":"upstream_error","code":"bad_response_status_code"}}`},
+		{"claude", `{"type":"error","error":{"message":"PrivateProvider https://provider.example/help","type":"overloaded_error"}}`, `{"type":"error","error":{"message":"The upstream service could not complete the request","type":"upstream_error","code":"bad_response_status_code"}}`},
+		{"gemini", `{"error":{"code":503,"message":"PrivateProvider https://provider.example/help","status":"UNAVAILABLE","details":[{"provider":"PrivateProvider"}]}}`, `{"error":{"code":503,"message":"The upstream service could not complete the request","type":"upstream_error","status":"UNKNOWN"}}`},
+		{"responses", `{"type":"error","message":"PrivateProvider https://provider.example/help","code":"private_error","param":"provider.example","details":{}}`, `{"type":"error","message":"The upstream service could not complete the request","code":"bad_response_status_code"}`},
+		{"response-failed", `{"type":"response.failed","response":{"error":{"code":"private_error","message":"PrivateProvider https://provider.example/help"}}}`, `{"type":"response.failed","response":{"error":{"message":"The upstream service could not complete the request","type":"upstream_error","code":"bad_response_status_code"}}}`},
+		{"string-error", `{"error":"PrivateProvider https://provider.example/help"}`, `{"error":"The upstream service could not complete the request"}`},
+		{"upstream-gateway", `{"error":{"type":"new_api_error","message":"PrivateProvider https://provider.example/help"}}`, `{"error":{"message":"The upstream service could not complete the request","type":"upstream_error","code":"bad_response_status_code"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+			ctx.Request.Header.Set("Accept-Language", "en")
+			setting.HideUpstreamInfo = false
+			assert.Equal(t, tc.input, string(service.ClientResponseJSON(ctx, []byte(tc.input))))
+			setting.HideUpstreamInfo = true
+			assert.JSONEq(t, tc.expected, string(service.ClientResponseJSON(ctx, []byte(tc.input))))
+			require.NoError(t, helper.StringData(ctx, tc.input))
+			assert.Contains(t, recorder.Body.String(), string(service.ClientResponseJSON(ctx, []byte(tc.input))))
+		})
+	}
+	setting.HideUpstreamInfo = true
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("Accept-Language", "en")
+	writeRelayStreamError(ctx, types.RelayFormatOpenAI, types.NewError(errors.New("input is required"), types.ErrorCodeInvalidRequest))
+	assert.Contains(t, recorder.Body.String(), "input is required")
 }
 
 func TestUpstreamPrivacyUserLogsKeepAdministratorDiagnostics(t *testing.T) {

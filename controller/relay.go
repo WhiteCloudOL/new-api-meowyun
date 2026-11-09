@@ -247,6 +247,10 @@ func writeRelayStreamError(c *gin.Context, format types.RelayFormat, apiError *t
 		common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, status)
 	}
 	status.MarkFailed(string(apiError.GetErrorCode()), string(apiError.GetErrorType()), apiError.StatusCode)
+	// Only this host-generated terminal error may retain its sanitized
+	// validation reason. Raw upstream frames never set this context marker.
+	common.SetContextKey(c, constant.ContextKeyClientRelayError, true)
+	defer common.SetContextKey(c, constant.ContextKeyClientRelayError, false)
 	upstreamURLs := common.UpstreamAddresses(c)
 	if format == types.RelayFormatClaude {
 		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: service.ClientRelayError(c, apiError).ToClaudeError(upstreamURLs...)})

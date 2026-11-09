@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -58,7 +60,7 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 		return
 	}
 
-	data = ClientResponseJSON(data)
+	data = ClientResponseJSON(c, data)
 	body := io.NopCloser(bytes.NewBuffer(data))
 
 	// We shouldn't set the header before we parse the response body, because the parse part may fail.
@@ -91,9 +93,10 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	c.Writer.Flush()
 }
 
-func ClientResponseJSON(data []byte) []byte {
+func ClientResponseJSON(c *gin.Context, data []byte) []byte {
 	if !operation_setting.GetGeneralSetting().HideUpstreamInfo {
 		return data
 	}
-	return common.RedactProviderMetadata(data)
+	preserveError := c != nil && common.GetContextKeyBool(c, constant.ContextKeyClientRelayError)
+	return common.RedactProviderMetadata(data, i18n.T(c, i18n.MsgUpstreamFailure), preserveError)
 }
