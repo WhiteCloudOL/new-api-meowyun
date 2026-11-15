@@ -58,11 +58,11 @@ export function RedemptionPurchaseBanner(props: { url: string }) {
       <img
         src={redemptionPoster}
         alt=''
-        width={1536}
-        height={1024}
+        width={768}
+        height={768}
         loading='lazy'
         decoding='async'
-        className='aspect-3/2 h-full w-full object-cover'
+        className='mx-auto h-44 w-full max-w-64 self-end object-contain object-bottom sm:h-60'
       />
     </section>
   )

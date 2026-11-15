@@ -21,7 +21,7 @@ import (
 func (a *AudioAdaptor) readNativeStream(c *gin.Context, response *http.Response, info *relaycommon.RelayInfo) (any, *types.NewAPIError) {
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 4096), maxPluginAudioResponseBytes)
-	config := pluginruntime.EffectiveConfig(a.plugin.Meta.ConfigDefaults, info.ChannelSetting.TaskPluginConfig)
+	config := pluginruntime.RawJSON(a.plugin.ChannelConfigFor(info.ChannelOtherSettings.PluginConfig))
 	var frame, data strings.Builder
 	var measured *dto.Usage
 	done, delivered := false, false

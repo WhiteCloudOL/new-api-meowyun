@@ -189,7 +189,7 @@ func (a *AudioAdaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.Rel
 	if normalized, valid := requestBody.(map[string]any); valid {
 		a.format, _ = normalized["format"].(string)
 	}
-	config := pluginruntime.EffectiveConfig(a.plugin.Meta.ConfigDefaults, info.ChannelSetting.TaskPluginConfig)
+	config := pluginruntime.RawJSON(a.plugin.ChannelConfigFor(info.ChannelOtherSettings.PluginConfig))
 	ctx := map[string]any{
 		"requestBody":   requestBody,
 		"model":         pinned.Model,
@@ -345,7 +345,7 @@ func (a *AudioAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rel
 	for name, values := range resp.Header {
 		headers[name] = append([]string(nil), values...)
 	}
-	config := pluginruntime.EffectiveConfig(a.plugin.Meta.ConfigDefaults, info.ChannelSetting.TaskPluginConfig)
+	config := pluginruntime.RawJSON(a.plugin.ChannelConfigFor(info.ChannelOtherSettings.PluginConfig))
 	value, err := a.plugin.Engine.CallPath(c.Request.Context(), "protocols", []string{"openai_audio_speech", "parseResponse"}, map[string]any{
 		"statusCode":      resp.StatusCode,
 		"headers":         headers,

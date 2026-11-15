@@ -86,7 +86,7 @@ export const meta = {
     en: "Alibaba Cloud speech synthesis, realtime audio and voice customization",
     zh: "阿里云语音合成、实时音频与音色定制",
   },
-  version: "1.1.0",
+  version: "1.2.0",
   author: { name: "MeowYun" },
   baseUrl: "https://dashscope.aliyuncs.com",
   models: [...COSY_MODELS, ...QWEN_MODELS, ...REALTIME_MODELS, NEXT_MODEL, ...VOICE_MODELS],
@@ -108,18 +108,31 @@ export const meta = {
       action: { enum: ["create_voice", "list_voice", "query_voice", "update_voice", "delete_voice"], description: { en: "Voice operation", zh: "音色操作" } },
     } },
   ],
-  configDefaults: {
-    sample_rate: 24000,
-    volume: 50,
-    pitch: 1.0,
-    language_type: "Auto",
-    enable_aigc_tag: false,
-    optimize_instructions: false,
-    allow_request_overrides: true,
-    max_audio_mb: 32,
-    download_timeout_seconds: 120,
-    qwen_base_url: "",
-  },
+  channelConfig: { type: "object", properties: {
+    sample_rate: { type: "integer", title: { en: "Sample rate", zh: "采样率" }, enum: [8000, 12000, 16000, 22050, 24000, 44100, 48000], default: 24000 },
+    volume: { type: "integer", title: { en: "Volume", zh: "音量" }, minimum: 0, maximum: 100, default: 50 },
+    bit_rate: { type: "integer", title: { en: "Bit rate", zh: "码率" }, minimum: 6, maximum: 510 },
+    pitch: { type: "number", title: { en: "Pitch", zh: "音调" }, minimum: 0.5, maximum: 2, default: 1 },
+    language_type: { type: "string", title: { en: "Language", zh: "语言" }, maxLength: 256, default: "Auto" },
+    language_hints: { type: "array", title: { en: "Language hints", zh: "语言提示" }, minItems: 1, maxItems: 1, items: { type: "string", title: { en: "Language code", zh: "语言代码" } } },
+    seed: { type: "integer", title: { en: "Random seed", zh: "随机种子" }, minimum: 0, maximum: 65535 },
+    enable_ssml: { type: "boolean", title: { en: "SSML enabled", zh: "启用 SSML" } },
+    enable_aigc_tag: { type: "boolean", title: { en: "AIGC tag enabled", zh: "启用 AIGC 标记" }, default: false },
+    aigc_propagator: { type: "string", title: { en: "AIGC propagator", zh: "AIGC 传播者" }, maxLength: 256 },
+    aigc_propagate_id: { type: "string", title: { en: "AIGC propagation ID", zh: "AIGC 传播标识" }, maxLength: 256 },
+    hot_fix: { type: "object", title: { en: "Pronunciation corrections", zh: "发音修正" }, format: "json" },
+    enable_markdown_filter: { type: "boolean", title: { en: "Markdown filtering enabled", zh: "启用 Markdown 过滤" } },
+    optimize_instructions: { type: "boolean", title: { en: "Instruction optimization enabled", zh: "启用指令优化" }, default: false },
+    word_timestamp_enabled: { type: "boolean", title: { en: "Word timestamps enabled", zh: "启用逐字时间戳" } },
+    channels: { type: "integer", title: { en: "Audio channels", zh: "声道数" }, minimum: 1, maximum: 2 },
+    references: { type: "array", title: { en: "Reference audio", zh: "参考音频" }, maxItems: 3, items: { type: "object", title: { en: "Audio reference", zh: "音频参考" }, format: "json" } },
+    enable_cbr: { type: "boolean", title: { en: "Constant bit rate enabled", zh: "启用固定码率" } },
+    quality: { type: "integer", title: { en: "Audio quality", zh: "音频质量" }, minimum: 0, maximum: 9 },
+    allow_request_overrides: { type: "boolean", title: { en: "Request overrides allowed", zh: "允许请求覆盖配置" }, default: true },
+    max_audio_mb: { type: "integer", title: { en: "Maximum audio size in MiB", zh: "音频大小上限（MiB）" }, minimum: 1, maximum: 64, default: 32 },
+    download_timeout_seconds: { type: "integer", title: { en: "Download timeout", zh: "下载超时" }, unit: "second", minimum: 1, maximum: 300, default: 120 },
+    qwen_base_url: { type: "string", title: { en: "Qwen service address", zh: "Qwen 服务地址" }, format: "url", maxLength: 191, pattern: "^(?:$|https://(?:(?:dashscope|dashscope-intl)\\.aliyuncs\\.com|[a-zA-Z0-9-]+\\.(?:cn-beijing|ap-southeast-1)\\.maas\\.aliyuncs\\.com)(?:/api/v1)?/?)$", default: "" },
+  } },
 };
 
 function fail(message) {
@@ -147,7 +160,7 @@ function checkString(config, name, maxLength = 256) {
     fail(`${name} must be a string of at most ${maxLength} characters`);
 }
 
-export function validateConfig(config) {
+function validateSpeechConfig(config) {
   if (!isPlainObject(config)) fail("plugin configuration must be an object");
   for (const key of Object.keys(config)) {
     if (!CONFIG_KEYS.has(key)) fail(`unknown plugin configuration field: ${key}`);
@@ -208,10 +221,10 @@ function requestOverrides(body) {
 }
 
 function mergeSettings(config, overrides) {
-  validateConfig(config);
+  validateSpeechConfig(config);
   if (Object.keys(overrides).length > 0 && config.allow_request_overrides === false) fail("per-request Alibaba TTS overrides are disabled");
   const merged = { ...config, ...overrides };
-  validateConfig(merged);
+  validateSpeechConfig(merged);
   return merged;
 }
 
@@ -315,7 +328,7 @@ function parseSpeech(ctx) {
   const audio = body.output && body.output.audio || {};
   if (!body.output || (!audio.url && !audio.data && !(ctx.requestBody && (ctx.requestBody.family === "voice" || ctx.requestBody.sse)))) fail("Alibaba TTS response is missing audio");
   const config = ctx.config || {};
-  validateConfig(config);
+  validateSpeechConfig(config);
   const usage = isPlainObject(body.usage) ? body.usage : {};
   const inputDetails = isPlainObject(usage.input_tokens_details) ? usage.input_tokens_details : {};
   const outputDetails = isPlainObject(usage.output_tokens_details) ? usage.output_tokens_details : {};

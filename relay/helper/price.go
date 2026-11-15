@@ -231,8 +231,8 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 }
 
 func modelPriceHelperAudioUsage(c *gin.Context, info *relaycommon.RelayInfo, plugin *jsplugin.LoadedPlugin, group hosttypes.GroupRatioInfo) (hosttypes.PriceData, error) {
-	expression, ok := billing_setting.ResolveTaskBillingExpr(plugin.Meta.Key, info.GetBillingModelName(), info.UpstreamModelName)
-	if !ok || billingexpr.UsesFixedPricing(expression) {
+	expression, _, ok := billing_setting.ResolveTaskBillingExpr(plugin.Meta.Key, info.GetBillingModelName(), info.UpstreamModelName)
+	if !ok || billingexpr.UsesFixedPricing(expression) || billingexpr.UsesChatQuantities(expression) {
 		return hosttypes.PriceData{}, fmt.Errorf("model %s requires a usage billing expression", info.GetBillingModelName())
 	}
 	schema, _ := plugin.Meta.UsageForModels(info.UpstreamModelName, info.OriginModelName)
@@ -256,7 +256,7 @@ func modelPriceHelperAudioUsage(c *gin.Context, info *relaycommon.RelayInfo, plu
 	if err != nil {
 		return hosttypes.PriceData{}, err
 	}
-	request, err := ResolveIncomingBillingExprRequestInput(c, info)
+	request, err := ResolveIncomingBillingExprRequestInput(c, info, billingexpr.UsedVars(expression)["param"])
 	if err != nil {
 		return hosttypes.PriceData{}, err
 	}
@@ -461,7 +461,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 		preConsumeMultiplier = max(1, preConsumeMultiplier)
 	}
 
-	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info)
+	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info, usedVars["param"])
 	if err != nil {
 		return hosttypes.PriceData{}, err
 	}

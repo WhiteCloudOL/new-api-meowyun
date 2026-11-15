@@ -1,12 +1,17 @@
 package controller
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/request_plugin_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,8 +75,7 @@ export function parseTaskResult() { return {}; }
 
 func TestValidateTaskPluginChannelConfiguration(t *testing.T) {
 	source := `
-export const meta = {apiVersion: 1, key: "channel-config", name: "Config", version: "1.0.0", author: {name: "Test"}, baseUrl: "https://example.com", models: ["speech"], fetchMode: "per_task", protocols: [{name: "openai_audio_speech"}], configDefaults: {volume: 50}};
-export function validateConfig(config) { if (!config || config.volume < 0 || config.volume > 100) throw new Error("volume out of range"); return true; }
+export const meta = {apiVersion: 1, key: "channel-config", name: "Config", version: "1.0.0", author: {name: "Test"}, baseUrl: "https://example.com", models: ["speech"], fetchMode: "per_task", protocols: [{name: "openai_audio_speech"}], channelConfig: {type: "object", properties: {volume: {type: "integer", title: {en: "Volume"}, minimum: 0, maximum: 100, default: 50}}}};
 export const protocols = {openai_audio_speech: {decodeRequest(ctx) { return {kind: "relay", model: ctx.model}; }, buildRequest() { return {}; }, parseResponse() { return {}; }}};
 `
 	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
@@ -81,10 +85,12 @@ export const protocols = {openai_audio_speech: {decodeRequest(ctx) { return {kin
 	valid := `{"task_plugin_key":"channel-config","task_plugin_config":{"volume":80}}`
 	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, Key: "sk", Setting: &valid}
 	require.NoError(t, validateChannel(channel, true))
+	assert.JSONEq(t, `{"volume":80}`, string(channel.GetOtherSettings().PluginConfig))
 
 	invalid := `{"task_plugin_key":"channel-config","task_plugin_config":{"volume":101}}`
 	channel.Setting = &invalid
-	require.ErrorContains(t, validateChannel(channel, true), "volume out of range")
+	channel.OtherSettings = ""
+	require.ErrorContains(t, validateChannel(channel, true), "volume")
 }
 
 func TestValidateNewAPIChannelTaskPluginExtensions(t *testing.T) {
@@ -131,4 +137,54 @@ export function parseTaskResult() { return {}; }
 	setting := `{"task_extend_plugin_keys":["gateway-ext-a"]}`
 	channel := &model.Channel{Type: constant.ChannelTypeOpenAI, Setting: &setting}
 	require.ErrorContains(t, validateChannel(channel, false), "only supported on New API channels")
+}
+
+func TestValidateChannelRequestPlugins(t *testing.T) {
+	plugin, err := jsplugin.DefaultRegistry.Register(`export const meta = {apiVersion: 1, key: "rp-channel", name: "Request only", version: "1.0.0", author: {name: "Test"}};
+export function ingress() { return {action: "continue"}; }`, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister(plugin.Meta.Key) })
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{request_plugin_setting.InstancesOption: `[{"id":"rp_known","name":"Known","plugin":"rp-channel","config":{"apiKey":"sk-moderation"}}]`}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{request_plugin_setting.InstancesOption: "[]"}))
+	})
+	baseURL := "https://example.com"
+
+	// A plugin that only processes requests is no channel type.
+	bound := `{"task_plugin_key":"rp-channel"}`
+	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, BaseURL: &baseURL, Setting: &bound}
+	require.ErrorContains(t, validateChannel(channel, false), "only processes requests and cannot be a channel type")
+
+	for setting, message := range map[string]string{
+		`{"request_plugins":["rp_known"]}`:            "",
+		`{"request_plugins":["rp_unknown"]}`:          "Request plugin instance rp_unknown does not exist",
+		`{"request_plugins":["rp_known","rp_known"]}`: "Request plugin instance rp_known is bound more than once",
+	} {
+		channel = &model.Channel{Type: constant.ChannelTypeOpenAI, BaseURL: &baseURL, Setting: &setting}
+		if message == "" {
+			assert.NoError(t, validateChannel(channel, false), setting)
+			continue
+		}
+		assert.ErrorContains(t, validateChannel(channel, false), message, setting)
+	}
+
+	// The list channel editors bind from carries no instance config; only
+	// the root user, who sets the instances up, reads it.
+	for role, config := range map[int]any{common.RoleAdminUser: nil, common.RoleRootUser: map[string]any{"apiKey": "sk-moderation"}} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest("GET", "/api/request_plugin/instances", nil)
+		c.Set("role", role)
+		GetRequestPluginInstances(c)
+		var response struct {
+			Data struct {
+				Instances []map[string]any `json:"instances"`
+			} `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.Len(t, response.Data.Instances, 1)
+		assert.Equal(t, "rp_known", response.Data.Instances[0]["id"])
+		assert.Equal(t, config, response.Data.Instances[0]["config"], "role %d", role)
+	}
+	assert.JSONEq(t, `{"apiKey":"sk-moderation"}`, string(request_plugin_setting.GetInstances()[0].Config))
 }

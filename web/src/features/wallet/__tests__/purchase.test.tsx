@@ -76,6 +76,11 @@ it('shows a safe keyboard-accessible store link when online topup is disabled an
     </I18nextProvider>
   )
   const link = screen.getByRole('link', { name: '购买卡密' })
+  const illustration = screen
+    .getByRole('region', { name: '卡密充值' })
+    .querySelector('img')
+  expect(illustration).toHaveClass('object-contain')
+  expect(illustration).toHaveAttribute('alt', '')
   expect(link).toHaveAttribute('href', storeUrl)
   expect(link).toHaveAttribute('target', '_blank')
   expect(link).toHaveAttribute('rel', 'noopener noreferrer')

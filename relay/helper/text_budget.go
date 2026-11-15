@@ -113,6 +113,20 @@ func mayIncurToolSurcharge(info *relaycommon.RelayInfo, body gjson.Result) bool 
 // conversion/overrides. Missing limits use an estimate without changing the
 // payload. Limits hidden in tool schemas or messages do not reduce the estimate.
 func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []byte) error {
+	return reserveTextOutputQuota(c, info, body, false)
+}
+
+// ReserveOpaqueTextOutputQuota retains the host request's candidate count but
+// never trusts a client cap to constrain an opaque provider protocol.
+func ReserveOpaqueTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []byte) error {
+	if err := reserveTextOutputQuota(c, info, body, true); err != nil {
+		return err
+	}
+	info.OpaqueTextBudgetReserved = true
+	return nil
+}
+
+func reserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []byte, opaque bool) error {
 	price := info.PriceData
 	if !info.EnforceTextBudget || price.GroupRatioInfo.GroupRatio == 0 || price.UsePrice ||
 		info.TieredBillingSnapshot == nil && price.ModelRatio == 0 {
@@ -155,6 +169,9 @@ func ReserveTextOutputQuota(c *gin.Context, info *relaycommon.RelayInfo, body []
 			// These legacy converters do not send an enforceable output cap.
 			capPaths, countPaths = nil, nil
 		}
+	}
+	if opaque {
+		capPaths = nil
 	}
 	object := gjson.ParseBytes(body)
 	maxOutput := float64(0)

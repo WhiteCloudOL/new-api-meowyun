@@ -19,10 +19,10 @@ func TestAlibabaTTSPluginContracts(t *testing.T) {
 	assert.Contains(t, plugin.Meta.AllowedHosts, "dashscope.aliyuncs.com")
 	assert.Contains(t, plugin.Meta.AllowedHosts, "dashscope-intl.aliyuncs.com")
 
-	_, err = plugin.Engine.Call(t.Context(), "validateConfig", map[string]any{"sample_rate": 12345})
-	require.ErrorContains(t, err, "sample_rate is not supported")
-	_, err = plugin.Engine.Call(t.Context(), "validateConfig", map[string]any{"qwen_base_url": "https://example.com"})
-	require.ErrorContains(t, err, "official Alibaba Cloud Model Studio HTTP base URL")
+	_, err = plugin.ValidateChannelConfig([]byte(`{"sample_rate":12345}`))
+	require.ErrorContains(t, err, "sample_rate")
+	_, err = plugin.ValidateChannelConfig([]byte(`{"qwen_base_url":"https://example.com"}`))
+	require.ErrorContains(t, err, "qwen_base_url")
 
 	decodedValue, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "decodeRequest"}, map[string]any{
 		"model": "cosyvoice-v3.5-plus",
@@ -40,7 +40,7 @@ func TestAlibabaTTSPluginContracts(t *testing.T) {
 		"upstreamModel": "cosyvoice-v3.5-plus",
 		"baseUrl":       "https://dashscope.aliyuncs.com/api/v1",
 		"authHeader":    "Bearer secret",
-		"config":        plugin.Meta.ConfigDefaults,
+		"config":        jsplugin.RawJSON(plugin.ChannelConfigFor(nil)),
 	})
 	require.NoError(t, err)
 	built := builtValue.(map[string]any)
@@ -57,7 +57,7 @@ func TestAlibabaTTSPluginContracts(t *testing.T) {
 			"output":     map[string]any{"audio": map[string]any{"data": "YXVkaW8=", "url": ""}},
 			"usage":      map[string]any{"characters": int64(2)},
 		},
-		"config": plugin.Meta.ConfigDefaults,
+		"config": jsplugin.RawJSON(plugin.ChannelConfigFor(nil)),
 	})
 	require.NoError(t, err)
 	parsed := parsedValue.(map[string]any)
@@ -79,7 +79,7 @@ func TestAlibabaTTSPluginContracts(t *testing.T) {
 		"upstreamModel": "qwen3-tts-flash",
 		"baseUrl":       "https://workspace.cn-beijing.maas.aliyuncs.com",
 		"authHeader":    "Bearer secret",
-		"config":        plugin.Meta.ConfigDefaults,
+		"config":        jsplugin.RawJSON(plugin.ChannelConfigFor(nil)),
 	})
 	require.NoError(t, err)
 	qwenBuilt := qwenBuiltValue.(map[string]any)
@@ -107,7 +107,7 @@ func TestAlibabaTTSNativeContracts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			decoded, err := plugin.Engine.CallPath(t.Context(), "native", []string{tc.decoder}, map[string]any{"userScope": "u7", "body": map[string]any{"kind": "json", "value": map[string]any{"model": tc.model, "input": tc.input}}})
 			require.NoError(t, err)
-			value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "buildRequest"}, map[string]any{"requestBody": decoded.(map[string]any)["requestBody"], "model": tc.model, "upstreamModel": tc.model, "baseUrl": "https://dashscope.aliyuncs.com", "authHeader": "Bearer secret", "userScope": "u7", "config": plugin.Meta.ConfigDefaults})
+			value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "buildRequest"}, map[string]any{"requestBody": decoded.(map[string]any)["requestBody"], "model": tc.model, "upstreamModel": tc.model, "baseUrl": "https://dashscope.aliyuncs.com", "authHeader": "Bearer secret", "userScope": "u7", "config": jsplugin.RawJSON(plugin.ChannelConfigFor(nil))})
 			require.NoError(t, err)
 			body := value.(map[string]any)["body"].(map[string]any)
 			for key, expected := range tc.wantInput {
@@ -116,7 +116,7 @@ func TestAlibabaTTSNativeContracts(t *testing.T) {
 		})
 	}
 	for _, voice := range []string{"cosyvoice-v3.5-plus-u8-abc", "cosyvoice-v3.5-plus-external-abc"} {
-		_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "buildRequest"}, map[string]any{"requestBody": map[string]any{"native": true, "family": "voice", "body": map[string]any{"input": map[string]any{"action": "delete_voice", "voice_id": voice}}}, "model": "voice-enrollment", "baseUrl": "https://dashscope.aliyuncs.com", "userScope": "u7", "config": plugin.Meta.ConfigDefaults})
+		_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "buildRequest"}, map[string]any{"requestBody": map[string]any{"native": true, "family": "voice", "body": map[string]any{"input": map[string]any{"action": "delete_voice", "voice_id": voice}}}, "model": "voice-enrollment", "baseUrl": "https://dashscope.aliyuncs.com", "userScope": "u7", "config": jsplugin.RawJSON(plugin.ChannelConfigFor(nil))})
 		require.ErrorContains(t, err, "another gateway user")
 	}
 	for _, tc := range []struct {

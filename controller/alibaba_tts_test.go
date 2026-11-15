@@ -211,12 +211,16 @@ func TestAlibabaTTSNativeFailuresRefundAndEnforceVoiceAccess(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			engine.ServeHTTP(recorder, request)
 			require.GreaterOrEqual(t, recorder.Code, http.StatusBadRequest, recorder.Body.String())
-			quota, err := model.GetUserQuota(user.Id, false)
-			require.NoError(t, err)
-			assert.Equal(t, 1_000_000, quota)
-			var current model.Token
-			require.NoError(t, model.DB.First(&current, token.Id).Error)
-			assert.Equal(t, 1_000_000, current.RemainQuota)
+			require.EventuallyWithT(t, func(collect *assert.CollectT) {
+				quota, err := model.GetUserQuota(user.Id, false)
+				if assert.NoError(collect, err) {
+					assert.Equal(t, 1_000_000, quota)
+				}
+				var current model.Token
+				if assert.NoError(collect, model.DB.First(&current, token.Id).Error) {
+					assert.Equal(t, 1_000_000, current.RemainQuota)
+				}
+			}, 5*time.Second, 10*time.Millisecond, "failed speech requests refund the wallet and finite token asynchronously")
 		})
 	}
 	// Permission to call voice-enrollment must not grant synthesis model access.
