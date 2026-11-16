@@ -106,6 +106,124 @@ func newPinRetryContext() *gin.Context {
 	return c
 }
 
+func TestInsufficientBalanceRetriesAnotherKeyBeforeLowerPriority(t *testing.T) {
+	previousDB, previousMain, previousLog := model.DB, common.MainDatabaseType(), common.LogDatabaseType()
+	previousRedis, previousMemory := common.RedisEnabled, common.MemoryCacheEnabled
+	previousSQLite, previousMaster := common.SQLitePath, common.IsMasterNode
+	t.Setenv("SQL_DSN", "local")
+	t.Setenv("LOG_SQL_DSN", "")
+	common.SQLitePath = "file:key-failover?mode=memory&cache=shared"
+	common.IsMasterNode = false
+	common.RedisEnabled, common.MemoryCacheEnabled = false, false
+	require.NoError(t, model.InitDB())
+	db := model.DB
+	connection, err := db.DB()
+	require.NoError(t, err)
+	connection.SetMaxOpenConns(1)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.SystemTask{}))
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.RedisEnabled, common.MemoryCacheEnabled = previousRedis, previousMemory
+		common.SetDatabaseTypes(previousMain, previousLog)
+		common.SQLitePath, common.IsMasterNode = previousSQLite, previousMaster
+		if previousDB != nil {
+			model.InitChannelCache()
+		}
+		require.NoError(t, connection.Close())
+	})
+	previousRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	t.Cleanup(func() { operation_setting.AutomaticRetryStatusCodeRanges = previousRanges })
+	operation_setting.AutomaticRetryStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: 401, End: 407}, {Start: 500, End: 503}}
+	const modelName = "key-failover-model"
+	for _, id := range []int{24, 25} {
+		channel := model.Channel{Id: id, Name: fmt.Sprintf("key-failover-%d", id), Type: constant.ChannelTypeOpenAI,
+			Key: "fallback-key", Status: common.ChannelStatusEnabled, Group: "default", Models: modelName,
+			Priority: common.GetPointer(int64(37 - id)), Weight: common.GetPointer(uint(1))}
+		require.NoError(t, db.Create(&channel).Error)
+		require.NoError(t, channel.AddAbilities(db))
+	}
+	quotaError := types.WithOpenAIError(types.OpenAIError{Code: "insufficient_balance", Message: "Wallet exhausted"}, http.StatusPaymentRequired)
+	markerError := types.NewOpenAIError(errors.New("[code=insufficient_balance] Coding Plan quota is exhausted"), types.ErrorCodeBadResponseStatusCode, http.StatusPaymentRequired)
+	for _, cached := range []bool{false, true} {
+		common.MemoryCacheEnabled = cached
+		for _, strategy := range []constant.MultiKeyMode{constant.MultiKeyModeRandom, constant.MultiKeyModePolling} {
+			for _, tc := range []struct {
+				name                         string
+				err                          *types.NewAPIError
+				budget                       int
+				pinned, written, disableNext bool
+				exhaust, reorder             bool
+				wantChannel                  int
+			}{
+				{name: "structured quota error", err: quotaError, budget: 2, wantChannel: 24},
+				{name: "provider quota marker", err: markerError, budget: 2, wantChannel: 24},
+				{name: "all keys exhausted", err: quotaError, budget: 2, exhaust: true, wantChannel: 24},
+				{name: "disabled remaining key", err: quotaError, budget: 2, disableNext: true, wantChannel: 25},
+				{name: "keys reordered", err: quotaError, budget: 2, reorder: true, wantChannel: 24},
+				{name: "other payment error", err: types.NewOpenAIError(errors.New("Payment required"), "other_payment", 402), budget: 2, wantChannel: 25},
+				{name: "other retryable error", err: types.NewOpenAIError(errors.New("Unavailable"), "unavailable", 503), budget: 2, wantChannel: 25},
+				{name: "parameter error", err: types.NewOpenAIError(errors.New("Invalid input"), "invalid", 400), budget: 2},
+				{name: "local wallet error", err: types.NewErrorWithStatusCode(errors.New("Local quota exhausted"), types.ErrorCodeInsufficientUserQuota, 403, types.ErrOptionWithSkipRetry()), budget: 2},
+				{name: "retry budget exhausted", err: quotaError},
+				{name: "single attempt pin", err: quotaError, budget: 2, pinned: true},
+				{name: "output already started", err: quotaError, budget: 2, written: true, wantChannel: 25},
+			} {
+				t.Run(fmt.Sprintf("cache=%v/%s/%s", cached, strategy, tc.name), func(t *testing.T) {
+					info := model.ChannelInfo{IsMultiKey: true, MultiKeySize: 4, MultiKeyMode: strategy, MultiKeyStatusList: map[int]int{2: 2}}
+					if tc.disableNext {
+						info.MultiKeyStatusList[1] = 2
+					}
+					require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", 24).Updates(map[string]any{"key": "quota-key\nworking-key\ndisabled-key\nquota-key", "channel_info": info}).Error)
+					model.InitChannelCache()
+					c := newPinRetryContext()
+					common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+					common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+					channel, err := model.CacheGetChannel(24)
+					require.NoError(t, err)
+					require.Nil(t, middleware.SetupContextForSelectedChannel(c, channel, modelName))
+					common.SetContextKey(c, constant.ContextKeyChannelKey, "quota-key")
+					service.RequestPolicy(c).BeginAttempt(channel, "default")
+					if tc.pinned {
+						service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 24, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
+					}
+					if tc.written {
+						c.Writer.WriteHeaderNow()
+					}
+					decision := service.DecideRelayRetry(c, tc.err, tc.budget)
+					if tc.wantChannel == 0 {
+						assert.Equal(t, "stop", decision.Action)
+						return
+					}
+					require.Equal(t, "retry", decision.Action)
+					if tc.reorder {
+						info.MultiKeyStatusList = map[int]int{3: 2}
+						require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", 24).Updates(map[string]any{"key": "working-key\nquota-key\nquota-key\ndisabled-key", "channel_info": info}).Error)
+						model.InitChannelCache()
+					}
+					param := &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: modelName, Retry: common.GetPointer(1)}
+					next, group, err := service.CacheGetRandomSatisfiedChannel(param)
+					require.NoError(t, err)
+					require.NotNil(t, next)
+					require.Equal(t, tc.wantChannel, next.Id)
+					require.Equal(t, "default", group)
+					require.Nil(t, middleware.SetupContextForSelectedChannel(c, next, modelName))
+					if tc.wantChannel == 24 {
+						assert.Equal(t, "working-key", common.GetContextKeyString(c, constant.ContextKeyChannelKey), "skip duplicate failed keys and disabled keys even if polling advanced or keys were reordered")
+					}
+					if tc.exhaust {
+						require.Equal(t, "retry", service.DecideRelayRetry(c, quotaError, 1).Action)
+						param.SetRetry(2)
+						fallback, _, err := service.CacheGetRandomSatisfiedChannel(param)
+						require.NoError(t, err)
+						require.NotNil(t, fallback)
+						assert.Equal(t, 25, fallback.Id)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestRequestPolicyConfigReturnsSettingsWithoutMigration(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

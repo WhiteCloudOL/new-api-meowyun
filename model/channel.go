@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
@@ -217,6 +218,12 @@ func (channel *Channel) GetKeys() []string {
 }
 
 func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
+	return channel.GetNextEnabledKeyExcluding(nil)
+}
+
+// GetNextEnabledKeyExcluding skips credentials that already failed this request.
+// Fingerprints keep exclusions valid when an administrator reorders the keys.
+func (channel *Channel) GetNextEnabledKeyExcluding(excluded map[[32]byte]struct{}) (string, int, *types.NewAPIError) {
 	// If not in multi-key mode, return the original key string directly.
 	if !channel.ChannelInfo.IsMultiKey {
 		return channel.Key, 0, nil
@@ -248,9 +255,15 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 	// Collect indexes of enabled keys
 	enabledIdx := make([]int, 0, len(keys))
 	for i := range keys {
-		if getStatus(i) == common.ChannelStatusEnabled {
-			enabledIdx = append(enabledIdx, i)
+		if getStatus(i) != common.ChannelStatusEnabled {
+			continue
 		}
+		if len(excluded) > 0 {
+			if _, failed := excluded[sha256.Sum256([]byte(keys[i]))]; failed {
+				continue
+			}
+		}
+		enabledIdx = append(enabledIdx, i)
 	}
 	// If no specific status list or none enabled, return an explicit error so caller can
 	// properly handle a channel with no available keys (e.g. mark channel disabled).
@@ -286,16 +299,15 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		if start < 0 || start >= len(keys) {
 			start = 0
 		}
-		for i := range keys {
-			idx := (start + i) % len(keys)
-			if getStatus(idx) == common.ChannelStatusEnabled {
-				// update polling index for next call (point to the next position)
-				channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
-				return keys[idx], idx, nil
+		idx := enabledIdx[0]
+		for _, candidate := range enabledIdx {
+			if candidate >= start {
+				idx = candidate
+				break
 			}
 		}
-		// Fallback – should not happen, but return first enabled key
-		return keys[enabledIdx[0]], enabledIdx[0], nil
+		channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
+		return keys[idx], idx, nil
 	default:
 		// Unknown mode, default to first enabled key (or original key string)
 		return keys[enabledIdx[0]], enabledIdx[0], nil

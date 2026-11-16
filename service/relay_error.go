@@ -51,6 +51,7 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 		return PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}
 	}
 	if operation_setting.ShouldRetryByStatusCode(code) {
+		queueInsufficientBalanceKeyRetry(c, err)
 		return PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "global"}
 	}
 	return PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"}

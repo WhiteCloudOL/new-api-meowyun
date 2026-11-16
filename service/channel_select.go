@@ -1,9 +1,11 @@
 package service
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -53,6 +55,89 @@ type RetryParam struct {
 	RequestPath  string
 	Retry        *int
 	resetNextTry bool
+}
+
+const channelKeyRetryContextKey = "channel_key_retry"
+
+type channelKeyRetryState struct {
+	PendingChannelID int
+	Group            string
+	Failed           map[int]map[[32]byte]struct{}
+}
+
+// SelectChannelKey applies request-local quota failures without disabling a key
+// globally: the provider's per-model or per-account quota may reset later.
+func SelectChannelKey(c *gin.Context, channel *model.Channel) (string, int, *types.NewAPIError) {
+	if c != nil {
+		if value, ok := c.Get(channelKeyRetryContextKey); ok {
+			state := value.(*channelKeyRetryState)
+			return channel.GetNextEnabledKeyExcluding(state.Failed[channel.Id])
+		}
+	}
+	return channel.GetNextEnabledKey()
+}
+
+func queueInsufficientBalanceKeyRetry(c *gin.Context, err *types.NewAPIError) {
+	if c == nil || err.StatusCode != http.StatusPaymentRequired ||
+		!common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey) ||
+		c.Writer != nil && c.Writer.Written() {
+		return
+	}
+	upstreamCode, _ := err.ToOpenAIError().Code.(string)
+	if upstreamCode != "insufficient_balance" && err.GetErrorCode() != "insufficient_balance" &&
+		!strings.Contains(strings.ToLower(err.Error()), "[code=insufficient_balance]") {
+		return
+	}
+	key := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
+	if key == "" {
+		return
+	}
+	state := &channelKeyRetryState{Failed: make(map[int]map[[32]byte]struct{})}
+	if value, ok := c.Get(channelKeyRetryContextKey); ok {
+		state = value.(*channelKeyRetryState)
+	}
+	id := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	if state.Failed[id] == nil {
+		state.Failed[id] = make(map[[32]byte]struct{})
+	}
+	state.Failed[id][sha256.Sum256([]byte(key))] = struct{}{}
+	state.PendingChannelID = id
+	state.Group = RequestPolicy(c).SelectedGroup
+	if state.Group == "" {
+		state.Group = common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	}
+	if state.Group == "auto" {
+		state.Group = common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
+	}
+	c.Set(channelKeyRetryContextKey, state)
+}
+
+func (state *channelKeyRetryState) channelWithRemainingKeys(param *RetryParam) *model.Channel {
+	id := state.PendingChannelID
+	state.PendingChannelID = 0
+	if id == 0 {
+		return nil
+	}
+	constraints := GetChannelConstraints(param.Ctx)
+	if pin, found, _ := constraints.ResolvedPin(); found && pin.ChannelId != id {
+		return nil
+	}
+	channel, err := model.CacheGetChannel(id)
+	if err != nil || channel.Status != common.ChannelStatusEnabled || !channel.ChannelInfo.IsMultiKey ||
+		!model.IsChannelEnabledForGroupModel(state.Group, param.ModelName, id) {
+		return nil
+	}
+	if matches, _ := model.ChannelSatisfiesFilters(channel, param.ModelName, constraints.Filters); !matches {
+		return nil
+	}
+	for i, key := range channel.GetKeys() {
+		status, specified := channel.ChannelInfo.MultiKeyStatusList[i]
+		_, failed := state.Failed[id][sha256.Sum256([]byte(key))]
+		if (!specified || status == common.ChannelStatusEnabled) && !failed {
+			return channel
+		}
+	}
+	return nil
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -122,6 +207,12 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
 	filters := GetChannelConstraints(param.Ctx).Filters
+	if value, ok := param.Ctx.Get(channelKeyRetryContextKey); ok {
+		state := value.(*channelKeyRetryState)
+		if candidate := state.channelWithRemainingKeys(param); candidate != nil {
+			return candidate, state.Group, nil
+		}
+	}
 	affinityRetryOffset := param.Ctx.GetInt(ginKeyChannelAffinityRetryOffset)
 
 	if param.TokenGroup == "auto" {
