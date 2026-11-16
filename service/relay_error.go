@@ -1,6 +1,8 @@
 package service
 
 import (
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -14,6 +16,15 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
+
+func isUpstreamInsufficientBalance(err *types.NewAPIError) bool {
+	if err == nil || err.StatusCode != http.StatusPaymentRequired || types.IsSkipRetryError(err) {
+		return false
+	}
+	code, _ := err.ToOpenAIError().Code.(string)
+	return code == "insufficient_balance" || err.GetErrorCode() == "insufficient_balance" ||
+		strings.Contains(strings.ToLower(err.Error()), "[code=insufficient_balance]")
+}
 
 // DecideRelayRetry is the single retry decision for relay attempts. The reason
 // is recorded in the request policy decision events of the log details.
@@ -64,6 +75,13 @@ func ShouldRetryRelayError(c *gin.Context, openaiErr *types.NewAPIError, retryTi
 func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {
 	if err == nil {
 		return
+	}
+	multiKey := channelError.IsMultiKey
+	if c != nil && common.GetContextKeyInt(c, constant.ContextKeyChannelId) == channelError.ChannelId {
+		multiKey = multiKey || common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
+	}
+	if multiKey && isUpstreamInsufficientBalance(err) {
+		model.MarkChannelKeyQuotaExhausted(channelError.ChannelId, channelError.UsingKey)
 	}
 	upstreamURLs := common.UpstreamAddresses(c)
 	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode(upstreamURLs...))))

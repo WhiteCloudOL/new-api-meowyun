@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
@@ -17,11 +18,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -222,6 +226,71 @@ func TestInsufficientBalanceRetriesAnotherKeyBeforeLowerPriority(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestInsufficientBalanceKeyRemainsBackupUntilRecovery(t *testing.T) {
+	server := miniredis.RunT(t)
+	previousRedis, previousClient := common.RedisEnabled, common.RDB
+	previousDisable, previousErrorLogs := common.AutomaticDisableChannelEnabled, constant.ErrorLogEnabled
+	common.RedisEnabled = true
+	common.RDB = redis.NewClient(&redis.Options{Addr: server.Addr()})
+	common.AutomaticDisableChannelEnabled, constant.ErrorLogEnabled = false, false
+	t.Cleanup(func() {
+		require.NoError(t, common.RDB.Close())
+		common.RedisEnabled, common.RDB = previousRedis, previousClient
+		common.AutomaticDisableChannelEnabled, constant.ErrorLogEnabled = previousDisable, previousErrorLogs
+	})
+	const healthyKey, quotaKey = "test-only-healthy-secret", "test-only-quota-secret"
+	channel := &model.Channel{Id: 99024, Key: healthyKey + "\n" + quotaKey, ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2, MultiKeyMode: constant.MultiKeyModeRandom}}
+	c := newPinRetryContext()
+	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
+	common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
+	common.SetContextKey(c, constant.ContextKeyChannelKey, quotaKey)
+	quotaError := types.WithOpenAIError(types.OpenAIError{Code: "insufficient_balance", Message: "Wallet exhausted"}, http.StatusPaymentRequired)
+	service.ProcessChannelError(c, *types.NewChannelError(channel.Id, 1, "quota-test", false, quotaKey, false), quotaError, nil)
+	keys := server.Keys()
+	require.Len(t, keys, 1)
+	assert.Equal(t, 10*time.Minute, server.TTL(keys[0]))
+	assert.NotContains(t, keys[0], quotaKey)
+	assert.NotContains(t, keys[0], healthyKey)
+	selected, _, keyErr := channel.GetNextEnabledKey()
+	require.Nil(t, keyErr)
+	assert.Equal(t, healthyKey, selected)
+
+	// A fresh Redis client still sees the preference; it is not just request state.
+	require.NoError(t, common.RDB.Close())
+	common.RDB = redis.NewClient(&redis.Options{Addr: server.Addr()})
+	selected, _, keyErr = channel.GetNextEnabledKey()
+	require.Nil(t, keyErr)
+	assert.Equal(t, healthyKey, selected)
+	model.MarkChannelKeyQuotaExhausted(channel.Id, healthyKey)
+	excluded := map[[32]byte]struct{}{sha256.Sum256([]byte(healthyKey)): {}}
+	selected, _, keyErr = channel.GetNextEnabledKeyExcluding(excluded)
+	require.Nil(t, keyErr)
+	assert.Equal(t, quotaKey, selected, "cooled-down keys remain available as backups")
+	service.MarkRequestPolicySuccess(c, nil)
+	selected, _, keyErr = channel.GetNextEnabledKey()
+	require.Nil(t, keyErr)
+	assert.Equal(t, quotaKey, selected, "a successful backup immediately becomes a primary key")
+	channel.ChannelInfo.MultiKeyStatusList = map[int]int{1: common.ChannelStatusManuallyDisabled}
+	selected, _, keyErr = channel.GetNextEnabledKey()
+	require.Nil(t, keyErr)
+	assert.Equal(t, healthyKey, selected, "a disabled key is never revived by the preference")
+	channel.ChannelInfo.MultiKeyStatusList = nil
+	server.FastForward(11 * time.Minute)
+	selected, _, keyErr = channel.GetNextEnabledKeyExcluding(map[[32]byte]struct{}{sha256.Sum256([]byte(quotaKey)): {}})
+	require.Nil(t, keyErr)
+	assert.Equal(t, healthyKey, selected)
+	assert.Empty(t, server.Keys())
+
+	service.ProcessChannelError(c, *types.NewChannelError(channel.Id, 1, "quota-test", true, quotaKey, false), types.NewOpenAIError(errors.New("Other payment error"), "payment_required", 402), nil)
+	assert.Empty(t, server.Keys(), "other errors keep their existing routing behavior")
+	common.RedisEnabled = false
+	model.MarkChannelKeyQuotaExhausted(channel.Id, quotaKey)
+	selected, _, keyErr = channel.GetNextEnabledKey()
+	require.Nil(t, keyErr)
+	assert.Equal(t, healthyKey, selected, "without Redis the process still remembers quota failures")
+	model.ClearChannelKeyQuotaExhausted(channel.Id, quotaKey)
 }
 
 func TestRequestPolicyConfigReturnsSettingsWithoutMigration(t *testing.T) {

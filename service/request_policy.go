@@ -140,6 +140,9 @@ func MarkRequestPolicySuccess(c *gin.Context, stream *relaycommon.StreamStatus) 
 	channelID := 0
 	if c != nil {
 		channelID = c.GetInt("channel_id")
+		if state.Successful && common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey) {
+			model.ClearChannelKeyQuotaExhausted(channelID, common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+		}
 	}
 	state.AddEvent(PolicyEvent{ChannelID: channelID, Decision: decision})
 }

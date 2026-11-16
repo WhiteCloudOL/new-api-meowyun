@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -83,9 +82,7 @@ func queueInsufficientBalanceKeyRetry(c *gin.Context, err *types.NewAPIError) {
 		c.Writer != nil && c.Writer.Written() {
 		return
 	}
-	upstreamCode, _ := err.ToOpenAIError().Code.(string)
-	if upstreamCode != "insufficient_balance" && err.GetErrorCode() != "insufficient_balance" &&
-		!strings.Contains(strings.ToLower(err.Error()), "[code=insufficient_balance]") {
+	if !isUpstreamInsufficientBalance(err) {
 		return
 	}
 	key := common.GetContextKeyString(c, constant.ContextKeyChannelKey)

@@ -235,6 +235,8 @@ func (channel *Channel) GetNextEnabledKeyExcluding(excluded map[[32]byte]struct{
 		// No keys available, return error, should disable the channel
 		return "", 0, types.NewError(errors.New("no keys available"), types.ErrorCodeChannelNoAvailableKey)
 	}
+	// Do not hold the per-channel polling lock during Redis I/O.
+	quotaExhausted := channelKeysWithExhaustedQuota(channel.Id, keys)
 
 	lock := GetChannelPollingLock(channel.Id)
 	lock.Lock()
@@ -270,6 +272,17 @@ func (channel *Channel) GetNextEnabledKeyExcluding(excluded map[[32]byte]struct{
 	// Returning the first key here caused requests to keep using an already-disabled key.
 	if len(enabledIdx) == 0 {
 		return "", 0, types.NewError(errors.New("no enabled keys"), types.ErrorCodeChannelNoAvailableKey)
+	}
+	if len(quotaExhausted) > 0 {
+		primary := make([]int, 0, len(enabledIdx))
+		for _, i := range enabledIdx {
+			if _, backup := quotaExhausted[sha256.Sum256([]byte(keys[i]))]; !backup {
+				primary = append(primary, i)
+			}
+		}
+		if len(primary) > 0 {
+			enabledIdx = primary
+		}
 	}
 
 	switch channel.ChannelInfo.MultiKeyMode {
