@@ -29,15 +29,17 @@ func TestBreezeVoiceLibraryTransport(t *testing.T) {
 		{"missing voice", "GET", "/v1/voices/narrator", "", 404},
 		{"no redirect credentials", "GET", "/v1/voices", "", 302},
 		{"invalid ID", "GET", "/v1/voices/..", "", 400},
+		{"missing user", "GET", "/v1/voices", "", 502},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				assert.Equal(t, tc.method, r.Method)
-				assert.Equal(t, tc.path, r.URL.Path)
+				assert.Equal(t, "/new-api/"+common.GenerateHMAC("breeze-tts-voice-v1:7")+tc.path, r.URL.Path)
 				assert.Equal(t, "Bearer provider-test-key", r.Header.Get("Authorization"))
 				assert.Empty(t, r.Header.Get("Cookie"))
+				assert.Empty(t, r.Header.Get("X-New-API-Voice-Scope"))
 				body, err := io.ReadAll(r.Body)
 				require.NoError(t, err)
 				assert.Equal(t, tc.body, string(body))
@@ -54,6 +56,9 @@ func TestBreezeVoiceLibraryTransport(t *testing.T) {
 				path += "/:voice_id"
 			}
 			engine.Handle(tc.method, path, func(c *gin.Context) {
+				if tc.name != "missing user" {
+					common.SetContextKey(c, constant.ContextKeyUserId, 7)
+				}
 				common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, upstream.URL+"/v1")
 				common.SetContextKey(c, constant.ContextKeyChannelKey, "provider-test-key")
 				c.Set("task_plugin_key", relaycommon.BreezePluginKey)
@@ -61,6 +66,7 @@ func TestBreezeVoiceLibraryTransport(t *testing.T) {
 			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 			request.Header.Set("Authorization", "Bearer gateway-test-key")
 			request.Header.Set("Cookie", "session=private")
+			request.Header.Set("X-New-API-Voice-Scope", "other-user")
 			request.Header.Set("Content-Type", "application/json")
 			recorder := httptest.NewRecorder()
 			engine.ServeHTTP(recorder, request)
@@ -69,7 +75,7 @@ func TestBreezeVoiceLibraryTransport(t *testing.T) {
 			} else {
 				assert.Equal(t, tc.status, recorder.Code)
 			}
-			if tc.name == "invalid ID" {
+			if tc.name == "invalid ID" || tc.name == "missing user" {
 				assert.Zero(t, calls)
 			} else {
 				assert.Equal(t, 1, calls)

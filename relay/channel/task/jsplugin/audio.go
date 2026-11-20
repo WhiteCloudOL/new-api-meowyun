@@ -98,13 +98,19 @@ func (a *AudioAdaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error
 	if a.request == nil {
 		return "", fmt.Errorf("plugin audio request was not built")
 	}
-	if err := pluginruntime.ValidateRequestURL(a.request.URL, info.ChannelBaseUrl, a.plugin.Meta.AllowedHosts); err != nil {
+	target := a.request.URL
+	allowedHosts := a.plugin.Meta.AllowedHosts
+	if a.plugin.Meta.Key == relaycommon.BreezePluginKey {
+		target = relaycommon.BreezeScopedURL(info.ChannelBaseUrl, info.UserId, "/v1/audio/speech")
+		allowedHosts = nil
+	}
+	if err := pluginruntime.ValidateRequestURL(target, info.ChannelBaseUrl, allowedHosts); err != nil {
 		return "", err
 	}
 	if method := strings.ToUpper(strings.TrimSpace(a.request.Method)); method != "" && method != http.MethodPost && !(a.socket && method == http.MethodGet) {
 		return "", fmt.Errorf("plugin audio request method must be POST")
 	}
-	return a.request.URL, nil
+	return target, nil
 }
 
 func (a *AudioAdaptor) BuildSocket(c *gin.Context, info *relaycommon.RelayInfo, requestBody any) ([]byte, error) {
@@ -145,6 +151,14 @@ func (a *AudioAdaptor) SetupRequestHeader(c *gin.Context, headers *http.Header, 
 	}
 	if a.contentType != "" {
 		headers.Set("Content-Type", a.contentType)
+	}
+	return nil
+}
+
+func (a *AudioAdaptor) SignUpstreamRequest(_ *gin.Context, info *relaycommon.RelayInfo, _ string, _ *url.URL, headers http.Header) error {
+	if a.plugin.Meta.Key == relaycommon.BreezePluginKey {
+		// Restore the gateway credential after any channel header overrides.
+		headers.Set("Authorization", "Bearer "+info.ApiKey)
 	}
 	return nil
 }

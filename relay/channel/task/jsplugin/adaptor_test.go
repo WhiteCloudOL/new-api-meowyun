@@ -3060,7 +3060,7 @@ func TestBreezeSpeechAdaptor(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
-			info := &relaycommon.RelayInfo{OriginModelName: modelName, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: modelName, ChannelBaseUrl: "https://speech.example/v1/", ApiKey: "provider-test-key"}}
+			info := &relaycommon.RelayInfo{UserId: 7, OriginModelName: modelName, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: modelName, ChannelBaseUrl: "https://speech.example/v1/", ApiKey: "provider-test-key"}}
 			info.SetEstimatePromptTokens(4)
 			ctx.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{Plugin: plugin, Protocol: "openai_audio_speech", Model: modelName, Operation: pluginruntime.HostProtocolOperation{Name: "create"}})
 			ctx.Set(pluginruntime.ContextKeyProtocolRequest, pluginruntime.ProtocolRequestContext{Model: modelName, Operation: "create", RouteRequestContext: pluginruntime.RouteRequestContext{Body: map[string]any{"kind": "json", "value": tc.body}}})
@@ -3093,9 +3093,20 @@ func TestBreezeSpeechAdaptor(t *testing.T) {
 			}
 			target, err := adaptor.GetRequestURL(info)
 			require.NoError(t, err)
-			assert.Equal(t, "https://speech.example/v1/audio/speech", target)
+			assert.Equal(t, "https://speech.example/new-api/"+common.GenerateHMAC("breeze-tts-voice-v1:7")+"/v1/audio/speech", target)
+			otherUser := *info
+			otherUser.UserId = 8
+			otherTarget, err := adaptor.GetRequestURL(&otherUser)
+			require.NoError(t, err)
+			assert.NotEqual(t, target, otherTarget)
+			otherUser.UserId = 0
+			_, err = adaptor.GetRequestURL(&otherUser)
+			require.Error(t, err)
 			headers := http.Header{}
 			require.NoError(t, adaptor.SetupRequestHeader(ctx, &headers, info))
+			assert.Equal(t, "Bearer provider-test-key", headers.Get("Authorization"))
+			headers.Set("Authorization", "Bearer downstream-key")
+			require.NoError(t, adaptor.SignUpstreamRequest(ctx, info, http.MethodPost, nil, headers))
 			assert.Equal(t, "Bearer provider-test-key", headers.Get("Authorization"))
 			assert.Equal(t, tc.responseType, adaptor.request.ResponseType)
 			_, err = adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{Model: modelName, Input: "different"})

@@ -22,10 +22,11 @@ import (
 
 var breezeVoiceID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// BreezeSpeechMetadata serves the upstream's shared voice library. Like the
-// upstream API, access is governed by the API key and model permission.
+// BreezeSpeechMetadata forwards voice operations in the authenticated user's
+// library. The upstream gateway key never authenticates to the direct API.
 func BreezeSpeechMetadata(c *gin.Context) {
-	base := strings.TrimRight(common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl), "/")
+	base := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
+	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 	key := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
 	if c.GetString("task_plugin_key") != relaycommon.BreezePluginKey || base == "" || key == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": i18n.T(c, i18n.MsgSpeechServiceUnavailable)})
@@ -40,7 +41,7 @@ func BreezeSpeechMetadata(c *gin.Context) {
 		}
 		path = strings.Replace(path, ":voice_id", id, 1)
 	}
-	target := strings.TrimSuffix(base, "/v1") + path
+	target := relaycommon.BreezeScopedURL(base, userID, path)
 	fail := func() {
 		c.JSON(http.StatusBadGateway, gin.H{"detail": i18n.T(c, i18n.MsgUpstreamFailure)})
 	}

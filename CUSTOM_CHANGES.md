@@ -1,5 +1,13 @@
 # Meowyun custom changes
 
+## 2026-11-20: BreezeTTS voice libraries by account
+
+BreezeTTS requests through the gateway use the authenticated New API user ID to select the upstream voice library. The same library is used for listing, registration, metadata changes, removal, native form speech and OpenAI-compatible speech. User-provided fields and headers cannot set the library. The channel key only authenticates to the private gateway routes of Breeze-TTS-2.cpp. New API hosts sharing a user database need the same stable `CRYPTO_SECRET` (or `SESSION_SECRET` when no separate key is configured).
+
+Use Breeze-TTS-2.cpp `v0.1.7-with-auth.2` or later, enable its gateway key file and put that distinct key on the BreezeTTS channel. The earlier shared library stays available through direct BreezeTTS endpoints. Its voices have no recorded New API owner, so none are assigned to gateway users automatically. Users can register their own references using the existing API. Voice IDs and request formats remain as in the direct API. Saved voice deletion retains the file, matching BreezeTTS's existing `file_kept` contract.
+
+The authorization design follows [OWASP ASVS 5.0.0](https://asvs.owasp.org/) and [OWASP Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html) guidance on server-side ownership checks and denying unauthorized access by default. In the CUDA HTTP check, two namespaces could independently create the same name, and a different account could not read, edit, delete or synthesize the first account's voice. Both speech request formats returned PCM for the owner. Direct auth and persistence after a restart were also exercised.
+
 ## 2026-11-20: free flow layout and security assessment
 
 Free requests now retain their Sankey links and owning users. Only connected nodes enter the chart; an entirely free, zero-token selection uses request counts for layout geometry while keeping the displayed monetary/token totals unchanged. BreezeTTS remains one node per real channel ID. The regression tests exercise the actual VChart layout, including mixed paid/free traffic.
