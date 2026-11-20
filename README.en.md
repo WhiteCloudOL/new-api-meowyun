@@ -177,8 +177,9 @@ and copy a dedicated gateway key into the channel's API Key field. Enable
 Clients use their New API-issued key with permission for `breeze-tts-2`.
 They manage voices under `/v1/voices` and synthesize with `/v1/audio/speech`
 using OpenAI JSON or native form data. Keys from the same account share its
-voice library. Direct BreezeTTS clients keep their original keys and voice
-library. See the [fork notes](./CUSTOM_CHANGES.md#2026-11-20-breezetts-voice-libraries-by-account)
+voice library. With Breeze-TTS-2.cpp `v0.1.7-with-auth.3` or later, operators
+using an authenticated direct key can also manage and use all gateway voices.
+See the [fork notes](./CUSTOM_CHANGES.md#2026-11-20-breezetts-voice-libraries-by-account)
 for persistence and upgrade behavior.
 
 <a id="quick-start"></a>

@@ -164,7 +164,7 @@ New API 是面向应用、Agent 和团队的自托管 AI 网关。将不同厂�
 
 在 New API 控制台添加绑定 `breeze-tts` 的**任务插件**渠道。Base URL 填 New API 能访问的 BreezeTTS 内网地址（以 `/v1` 结尾），API Key 填上述专用密钥。在需要的分组启用 `breeze-tts-2` 并配置价格。换密钥时，同时更新 BreezeTTS 端的文件和 New API 的渠道配置，并重启 BreezeTTS 使文件生效。
 
-下游客户端使用 New API 签发且有权访问 `breeze-tts-2` 的 Key。通过 `/v1/voices` 管理音色，通过 `/v1/audio/speech` 用 OpenAI JSON 或原生表单合成。同账户的多个 Key 共享自己的音色库。直连 BreezeTTS 的客户端继续使用原来的地址、密钥和音色库。持久化与升级行为见[分支说明](./CUSTOM_CHANGES.md#2026-11-20-breezetts-voice-libraries-by-account)。
+下游客户端使用 New API 签发且有权访问 `breeze-tts-2` 的 Key。通过 `/v1/voices` 管理音色，通过 `/v1/audio/speech` 用 OpenAI JSON 或原生表单合成。同账户的多个 Key 共享自己的音色库。从 Breeze-TTS-2.cpp `v0.1.7-with-auth.3` 起，管理者使用原直连密钥可以查看、管理和使用所有账户的音色。持久化与升级行为见[分支说明](./CUSTOM_CHANGES.md#2026-11-20-breezetts-voice-libraries-by-account)。
 
 <a id="quick-start"></a>
 
