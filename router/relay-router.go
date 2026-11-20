@@ -180,10 +180,12 @@ func SetRelayRouter(router *gin.Engine) {
 	relayMjRouter.Use(middleware.SystemPerformanceCheck())
 	registerMjRouterGroup(relayMjRouter)
 
-	relayMjModeRouter := router.Group("/:mode/mj")
-	relayMjModeRouter.Use(middleware.RouteTag("relay"))
-	relayMjModeRouter.Use(middleware.SystemPerformanceCheck())
-	registerMjRouterGroup(relayMjModeRouter)
+	for _, prefix := range []string{"/fast/mj", "/relax/mj", "/turbo/mj", "/v1/mj"} {
+		relayMjModeRouter := router.Group(prefix)
+		relayMjModeRouter.Use(middleware.RouteTag("relay"))
+		relayMjModeRouter.Use(middleware.SystemPerformanceCheck())
+		registerMjRouterGroup(relayMjModeRouter)
+	}
 	//relayMjRouter.Use()
 
 	relayGeminiRouter := router.Group("/v1beta")
@@ -218,7 +220,10 @@ func SetRelayRouter(router *gin.Engine) {
 }
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
-	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
+	relayMjRouter.GET("/image/:id", middleware.GlobalAPIRateLimit(), func(c *gin.Context) {
+		c.AddParam("artifact_key", "midjourney-image")
+		c.Next()
+	}, middleware.TokenOrTaskArtifactAccessAuth("id", "artifact_key"), relay.RelayMidjourneyImage)
 	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute())
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)

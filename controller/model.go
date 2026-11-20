@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -334,6 +335,20 @@ func DashboardListModels(c *gin.Context) {
 		if plugin, ok := jsplugin.DefaultRegistry.GetByChannelType(channelType); ok {
 			modelsByChannel[channelType] = append([]string(nil), plugin.Meta.Models...)
 		}
+	}
+	if operation_setting.GetGeneralSetting().HideUpstreamInfo && c.GetInt("role") < common.RoleAdminUser {
+		modelNames := make(map[string]struct{})
+		for _, models := range modelsByChannel {
+			for _, name := range models {
+				modelNames[name] = struct{}{}
+			}
+		}
+		names := make([]string, 0, len(modelNames))
+		for name := range modelNames {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		modelsByChannel = map[int][]string{0: names}
 	}
 	c.JSON(200, gin.H{
 		"success": true,

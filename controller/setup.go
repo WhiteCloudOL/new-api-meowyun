@@ -31,7 +31,7 @@ func GetSetup(c *gin.Context) {
 	if constant.Setup {
 		c.JSON(200, gin.H{
 			"success": true,
-			"data":    setup,
+			"data":    gin.H{"status": true},
 		})
 		return
 	}

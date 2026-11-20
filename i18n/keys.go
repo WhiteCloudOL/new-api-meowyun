@@ -87,6 +87,7 @@ const (
 	MsgEmailSecurityNoticeAdvice  = "email.security_notice.advice"
 
 	MsgSecurityEventPasswordUpdated      = "email.security_event.password_updated"
+	MsgSecurityEventUsernameUpdated      = "email.security_event.username_updated"
 	MsgSecurityEventEmailChangeRequested = "email.security_event.email_change_requested"
 	MsgSecurityEventEmailChanged         = "email.security_event.email_changed"
 	MsgSecurityEventEmailConfirmed       = "email.security_event.email_confirmed"

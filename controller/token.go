@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 type tokenAutoGroupsInput struct {
@@ -87,6 +89,22 @@ func getTokenRequestUserGroup(c *gin.Context) (string, error) {
 		return userGroup, nil
 	}
 	return model.GetUserGroup(c.GetInt("id"), false)
+}
+
+func validateTokenRequestGroup(c *gin.Context, group string) bool {
+	if group == "" || group == "auto" {
+		return true
+	}
+	userGroup, err := getTokenRequestUserGroup(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	if !service.IsUserSelectableGroup(userGroup, group) {
+		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Invalid parameters"))
+		return false
+	}
+	return true
 }
 
 func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) bool {
@@ -163,13 +181,17 @@ func SearchTokens(c *gin.Context) {
 func GetToken(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")
-	if err != nil {
-		common.ApiError(c, err)
+	if err != nil || id <= 0 {
+		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
 		return
 	}
 	token, err := model.GetTokenByIds(id, userId)
 	if err != nil {
-		common.ApiError(c, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ApiErrorStatus(c, http.StatusNotFound, common.NewMessage("access token not found"))
+		} else {
+			common.ApiErrorStatus(c, http.StatusInternalServerError, common.NewMessage("Database error, please contact the administrator"))
+		}
 		return
 	}
 	common.ApiSuccess(c, buildMaskedTokenResponse(token))
@@ -300,10 +322,13 @@ func AddToken(c *gin.Context) {
 	request := tokenRequest{}
 	err := c.ShouldBindJSON(&request)
 	if err != nil {
-		common.ApiError(c, err)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	token := request.Token
+	if !validateTokenRequestGroup(c, token.Group) {
+		return
+	}
 	if len(token.Name) > 50 {
 		common.ApiErrorT(c, "Token name is too long")
 		return
@@ -405,10 +430,13 @@ func UpdateToken(c *gin.Context) {
 	request := tokenRequest{}
 	err := c.ShouldBindJSON(&request)
 	if err != nil {
-		common.ApiError(c, err)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	token := request.Token
+	if statusOnly == "" && !validateTokenRequestGroup(c, token.Group) {
+		return
+	}
 	params := tokenAuditParams(c)
 	if token.Id > 0 {
 		params["id"] = token.Id

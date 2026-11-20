@@ -20,6 +20,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestUpstreamPrivacyDashboardModelCatalogHidesProviderGroupsOnlyForUsers(t *testing.T) {
+	setting := operation_setting.GetGeneralSetting()
+	previous := setting.HideUpstreamInfo
+	setting.HideUpstreamInfo = true
+	t.Cleanup(func() { setting.HideUpstreamInfo = previous })
+	for _, role := range []int{common.RoleCommonUser, common.RoleAdminUser} {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Set("role", role)
+		DashboardListModels(c)
+		var body struct {
+			Data map[int][]string `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+		if role == common.RoleCommonUser {
+			require.Len(t, body.Data, 1)
+			assert.NotEmpty(t, body.Data[0])
+		} else {
+			assert.Greater(t, len(body.Data), 1)
+		}
+	}
+}
+
 func TestUpstreamPrivacyVoiceLibraryError(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	setting := operation_setting.GetGeneralSetting()

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -80,6 +81,53 @@ func TestCreemWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 
 	setting.CreemProducts = "[]"
 	require.False(t, isCreemWebhookEnabled())
+}
+
+func TestCreemWebhookSignatureNeverBypassesVerificationInTestMode(t *testing.T) {
+	previous := setting.CreemTestMode
+	t.Cleanup(func() { setting.CreemTestMode = previous })
+	for _, testMode := range []bool{false, true} {
+		setting.CreemTestMode = testMode
+		secret := strings.Repeat("\x0b", 20)
+		// RFC 4231 HMAC-SHA256 test vector.
+		validSignature := "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+		assert.True(t, verifyCreemSignature("Hi There", validSignature, secret))
+		assert.False(t, verifyCreemSignature("tampered", validSignature, secret))
+		assert.False(t, verifyCreemSignature("Hi There", "forged", secret))
+		assert.False(t, verifyCreemSignature("Hi There", validSignature, ""))
+		assert.False(t, verifyCreemSignature("Hi There", "", ""))
+	}
+}
+
+func TestCreemWebhookDiagnosticsExcludePayloadAndSignature(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	previousAPI, previousProducts, previousSecret := setting.CreemApiKey, setting.CreemProducts, setting.CreemWebhookSecret
+	previousWriter, previousErrors := gin.DefaultWriter, gin.DefaultErrorWriter
+	var output bytes.Buffer
+	gin.DefaultWriter, gin.DefaultErrorWriter = &output, &output
+	setting.CreemApiKey, setting.CreemProducts, setting.CreemWebhookSecret = "test-only-api-key", `[{"productId":"test-product"}]`, "test-only-webhook-secret"
+	t.Cleanup(func() {
+		setting.CreemApiKey, setting.CreemProducts, setting.CreemWebhookSecret = previousAPI, previousProducts, previousSecret
+		gin.DefaultWriter, gin.DefaultErrorWriter = previousWriter, previousErrors
+	})
+	body := `{"id":"test-event","eventType":"ignored.test","object":{},"private":"private-payload-value"}`
+	valid := generateCreemSignature(body, setting.CreemWebhookSecret)
+	for _, signature := range []string{valid, "test-forged-signature"} {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/user/creem/notify", strings.NewReader(body))
+		c.Request.Header.Set(CreemSignatureHeader, signature)
+		CreemWebhook(c)
+		if signature == valid {
+			assert.Equal(t, http.StatusOK, response.Code)
+		} else {
+			assert.Equal(t, http.StatusUnauthorized, response.Code)
+		}
+	}
+	assert.Contains(t, output.String(), "Creem webhook received request")
+	for _, secret := range []string{valid, "test-forged-signature", "private-payload-value", "test-only-webhook-secret"} {
+		assert.NotContains(t, output.String(), secret)
+	}
 }
 
 func TestWaffoWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {

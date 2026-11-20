@@ -1,15 +1,14 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
-	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
@@ -19,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
+	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
 
@@ -224,27 +224,32 @@ func SendEmailVerification(c *gin.Context) {
 		return
 	}
 
-	if model.IsEmailAlreadyTaken(email) {
-		common.ApiErrorT(c, "Email address is already in use")
-		return
-	}
-	code := common.GenerateVerificationCode(6)
-	common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose)
-	// The address may not belong to an account yet, so the mail follows the
-	// request language.
-	systemName := map[string]any{"SystemName": common.SystemName}
-	subject := i18n.T(c, i18n.MsgEmailVerificationSubject, systemName)
-	content := fmt.Sprintf("<p>%s</p>"+
-		"<p>%s</p>"+
-		"<p>%s</p>",
-		i18n.T(c, i18n.MsgEmailVerificationGreeting, systemName),
-		i18n.T(c, i18n.MsgEmailVerificationCode, map[string]any{"Code": code}),
-		i18n.T(c, i18n.MsgEmailVerificationValidity, map[string]any{"Minutes": common.VerificationValidMinutes}))
-	err = common.SendEmail(subject, email, content)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
+	lang := i18n.StatedLang(c)
+	// The response and its timing must not reveal whether the address exists.
+	// Mail delivery happens outside the request, with no retained Gin context.
+	gopool.Go(func() {
+		if model.IsEmailAlreadyTaken(email) {
+			return
+		}
+		code := common.GenerateVerificationCode(6)
+		if err := common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose); err != nil {
+			common.SysError(common.LogText("verification code storage failed"))
+			return
+		}
+		// The address may not belong to an account yet, so the mail follows the
+		// request language.
+		systemName := map[string]any{"SystemName": common.SystemName}
+		subject := i18n.Translate(lang, i18n.MsgEmailVerificationSubject, systemName)
+		content := fmt.Sprintf("<p>%s</p>"+
+			"<p>%s</p>"+
+			"<p>%s</p>",
+			i18n.Translate(lang, i18n.MsgEmailVerificationGreeting, systemName),
+			i18n.Translate(lang, i18n.MsgEmailVerificationCode, map[string]any{"Code": code}),
+			i18n.Translate(lang, i18n.MsgEmailVerificationValidity, map[string]any{"Minutes": common.VerificationValidMinutes}))
+		if err := common.SendEmail(subject, email, content); err != nil {
+			common.SysError(common.LogText("verification email delivery failed"))
+		}
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -258,32 +263,38 @@ func SendPasswordResetEmail(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	if user, err := model.GetUniqueUserByEmail(email); err == nil {
-		code := common.GenerateVerificationCode(0)
-		common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose)
-		link := fmt.Sprintf("%s/user/reset?email=%s&token=%s", system_setting.ServerAddress, email, code)
-		lang := user.GetSetting().Language
-		if lang == "" {
-			lang = i18n.StatedLang(c)
+	requestLanguage := i18n.StatedLang(c)
+	gopool.Go(func() {
+		if user, err := model.GetUniqueUserByEmail(email); err == nil {
+			code := common.GenerateVerificationCode(0)
+			if err := common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose); err != nil {
+				common.SysError(common.LogText("verification code storage failed"))
+				return
+			}
+			link := system_setting.ServerAddress + "/user/reset#" + url.Values{"email": {email}, "token": {code}}.Encode()
+			lang := user.GetSetting().Language
+			if lang == "" {
+				lang = requestLanguage
+			}
+			systemName := map[string]any{"SystemName": common.SystemName}
+			linkParams := map[string]any{"Link": link}
+			subject := i18n.Translate(lang, i18n.MsgEmailPasswordResetSubject, systemName)
+			content := fmt.Sprintf("<p>%s</p>"+
+				"<p>%s</p>"+
+				"<p>%s </p>"+
+				"<p>%s</p>",
+				i18n.Translate(lang, i18n.MsgEmailPasswordResetGreeting, systemName),
+				i18n.Translate(lang, i18n.MsgEmailPasswordResetLink, linkParams),
+				i18n.Translate(lang, i18n.MsgEmailPasswordResetLinkFallback, linkParams),
+				i18n.Translate(lang, i18n.MsgEmailPasswordResetValidity, map[string]any{"Minutes": common.VerificationValidMinutes}))
+			err := common.SendEmail(subject, email, content)
+			if err != nil {
+				common.SysError(common.LogText("verification email delivery failed"))
+			}
+		} else if err != nil && !errors.Is(err, model.ErrEmailNotFound) {
+			common.SysError(common.LogText("password reset account lookup failed"))
 		}
-		systemName := map[string]any{"SystemName": common.SystemName}
-		linkParams := map[string]any{"Link": link}
-		subject := i18n.Translate(lang, i18n.MsgEmailPasswordResetSubject, systemName)
-		content := fmt.Sprintf("<p>%s</p>"+
-			"<p>%s</p>"+
-			"<p>%s </p>"+
-			"<p>%s</p>",
-			i18n.Translate(lang, i18n.MsgEmailPasswordResetGreeting, systemName),
-			i18n.Translate(lang, i18n.MsgEmailPasswordResetLink, linkParams),
-			i18n.Translate(lang, i18n.MsgEmailPasswordResetLinkFallback, linkParams),
-			i18n.Translate(lang, i18n.MsgEmailPasswordResetValidity, map[string]any{"Minutes": common.VerificationValidMinutes}))
-		err := common.SendEmail(subject, email, content)
-		if err != nil {
-			logger.LogError(c.Request.Context(), common.LogText("failed to send password reset email to %s: %s", email, err.Error()))
-		}
-	} else if err != nil && !errors.Is(err, model.ErrEmailNotFound) {
-		logger.LogWarn(c.Request.Context(), common.LogText("skip password reset email for %s: %s", email, err.Error()))
-	}
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -291,15 +302,16 @@ func SendPasswordResetEmail(c *gin.Context) {
 }
 
 type PasswordResetRequest struct {
-	Email string `json:"email"`
-	Token string `json:"token"`
+	Email    string `json:"email"`
+	Token    string `json:"token"`
+	Password string `json:"password"`
 }
 
 func ResetPassword(c *gin.Context) {
 	var req PasswordResetRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&req)
+	err := common.DecodeJson(c.Request.Body, &req)
 	if err != nil {
-		common.ApiError(c, err)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	req.Email = model.NormalizeEmail(req.Email)
@@ -307,12 +319,15 @@ func ResetPassword(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	if !common.VerifyCodeWithKey(req.Email, req.Token, common.PasswordResetPurpose) {
+	if err := common.ValidateNewAccountPassword(req.Password); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !common.ConsumeVerificationCodeWithKey(req.Email, req.Token, common.PasswordResetPurpose) {
 		common.ApiErrorT(c, "Password reset link is invalid or has expired")
 		return
 	}
-	password := common.GenerateVerificationCode(12)
-	err = model.ResetUserPasswordByEmail(req.Email, password)
+	err = model.ResetUserPasswordByEmail(req.Email, req.Password)
 	if err != nil {
 		if errors.Is(err, model.ErrEmailNotFound) || errors.Is(err, model.ErrEmailAmbiguous) {
 			common.ApiErrorT(c, "Password reset link is invalid or has expired")
@@ -321,11 +336,14 @@ func ResetPassword(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.DeleteKey(req.Email, common.PasswordResetPurpose)
+	if user, lookupErr := model.GetUniqueUserByEmail(req.Email); lookupErr == nil {
+		_ = service.NotifyAccountSecurityChange(service.AccountMailLanguage(c, user.Id), user.Email, i18n.MsgSecurityEventPasswordUpdated)
+		model.RecordAuditLog(c, model.AuditLog{UserId: user.Id, Username: user.Username, ActorRole: user.Role,
+			Category: model.AuditCategorySecurity, Action: "password_reset", AuthMethod: "email", Status: http.StatusOK, Success: true, Content: "Password reset"})
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    password,
 	})
 	return
 }

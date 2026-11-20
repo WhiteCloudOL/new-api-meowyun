@@ -344,7 +344,7 @@ func RevokeLegacyAccessToken(c *gin.Context) {
 
 func GetAuditLogs(c *gin.Context) {
 	page := common.GetPageQuery(c)
-	if page.Page < 1 || page.PageSize < 1 || page.Page > 100000000 {
+	if !page.IsValid() || page.Page > 100000000 {
 		common.ApiErrorMsg(c, "Invalid audit pagination")
 		return
 	}

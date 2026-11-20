@@ -1130,6 +1130,17 @@ export function buildFlowSankeySpec(
 ): VChartSpec {
   const labelColor = textColor ?? DEFAULT_FLOW_LABEL_COLOR
   const activeStroke = textColor ?? DEFAULT_FLOW_ACTIVE_STROKE
+  // Free requests still connect users and tokens to their actual channel.
+  // Otherwise justify alignment moves the disconnected nodes into its column.
+  const visibleLinks = flow.links.filter(
+    (link) => link.value > 0 || link.requests > 0
+  )
+  const connectedNodes = new Set(
+    visibleLinks.flatMap((link) => [link.source, link.target])
+  )
+  // An entirely zero-valued layout produces 0 * Infinity in VChart. Use
+  // request counts only for geometry; quota, tokens and shares stay unchanged.
+  const useRequestLayout = !visibleLinks.some((link) => link.value > 0)
   return {
     type: 'sankey',
     data: [
@@ -1137,52 +1148,51 @@ export function buildFlowSankeySpec(
         id: 'flow',
         values: [
           {
-            nodes: flow.nodes.map((node) => ({
-              key: node.id,
-              name: node.label,
-              rawLabel: node.label,
-              kind: node.kind,
-              value: node.value,
-              requests: node.requests,
-              quota: node.quota,
-              tokens: node.tokens,
-              color: node.color,
-              colorKey: node.colorKey,
-              highlighted: node.highlighted,
-              dimmed: node.dimmed,
-            })),
-            links: flow.links
-              .filter((link) => link.value > 0)
-              .sort(byLinkDrawPriority)
-              .map((link, index) => {
-                let zIndex = 100_000 + index
-                if (link.highlighted) {
-                  zIndex = 1_000_000 + index
-                } else if (link.dimmed) {
-                  zIndex = index
-                }
+            nodes: flow.nodes
+              .filter((node) => connectedNodes.has(node.id))
+              .map((node) => ({
+                key: node.id,
+                name: node.label,
+                rawLabel: node.label,
+                kind: node.kind,
+                value: useRequestLayout ? node.requests : node.value,
+                requests: node.requests,
+                quota: node.quota,
+                tokens: node.tokens,
+                color: node.color,
+                colorKey: node.colorKey,
+                highlighted: node.highlighted,
+                dimmed: node.dimmed,
+              })),
+            links: visibleLinks.sort(byLinkDrawPriority).map((link, index) => {
+              let zIndex = 100_000 + index
+              if (link.highlighted) {
+                zIndex = 1_000_000 + index
+              } else if (link.dimmed) {
+                zIndex = index
+              }
 
-                return {
-                  source: link.source,
-                  target: link.target,
-                  linkKey: linkStableKey(link),
-                  sourceLabel: link.sourceLabel,
-                  targetLabel: link.targetLabel,
-                  value: link.value,
-                  requests: link.requests,
-                  quota: link.quota,
-                  tokens: link.tokens,
-                  color: link.color,
-                  linkColor: link.linkColor,
-                  linkAlpha: link.linkAlpha,
-                  hoverColor: link.hoverColor,
-                  colorKey: link.colorKey,
-                  share: link.share,
-                  highlighted: link.highlighted,
-                  dimmed: link.dimmed,
-                  zIndex,
-                }
-              }),
+              return {
+                source: link.source,
+                target: link.target,
+                linkKey: linkStableKey(link),
+                sourceLabel: link.sourceLabel,
+                targetLabel: link.targetLabel,
+                value: useRequestLayout ? link.requests : link.value,
+                requests: link.requests,
+                quota: link.quota,
+                tokens: link.tokens,
+                color: link.color,
+                linkColor: link.linkColor,
+                linkAlpha: link.linkAlpha,
+                hoverColor: link.hoverColor,
+                colorKey: link.colorKey,
+                share: link.share,
+                highlighted: link.highlighted,
+                dimmed: link.dimmed,
+                zIndex,
+              }
+            }),
           },
         ],
       },

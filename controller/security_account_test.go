@@ -23,8 +23,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -461,6 +463,118 @@ func TestSecurityAccountProfileReadsPasswordStatusInOneQuery(t *testing.T) {
 			assert.Nil(t, refreshed.AccessToken)
 		})
 	}
+}
+
+func TestPasswordResetUsesChosenPasswordAndRejectsReplayedAuthorization(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	newSecurityMailbox(t)
+	const email = "reset-user@example.com"
+	const token = "test-only-reset-authorization"
+	require.NoError(t, model.DB.Model(user).Update("email", email).Error)
+	require.NoError(t, common.RegisterVerificationCodeWithKey(email, token, common.PasswordResetPurpose))
+	invalid, err := common.Marshal(map[string]string{"email": email, "token": token, "password": "short"})
+	require.NoError(t, err)
+	response := securityEnrollmentRequest(http.MethodPost, "/api/user/reset", string(invalid), "", service.AuthIdentity{}, ResetPassword)
+	assert.Contains(t, response.Body.String(), `"success":false`)
+	assert.True(t, common.VerifyCodeWithKey(email, token, common.PasswordResetPurpose))
+	const chosen = "chosen-reset-password"
+	body, err := common.Marshal(map[string]string{"email": email, "token": token, "password": chosen})
+	require.NoError(t, err)
+	response = securityEnrollmentRequest(http.MethodPost, "/api/user/reset", string(body), "", service.AuthIdentity{}, ResetPassword)
+	require.Contains(t, response.Body.String(), `"success":true`, response.Body.String())
+	assert.NotContains(t, response.Body.String(), chosen)
+	assert.NotContains(t, response.Body.String(), token)
+	stored, err := model.GetUserById(user.Id, true)
+	require.NoError(t, err)
+	assert.True(t, common.ValidatePasswordAndHash(chosen, stored.Password))
+	assert.False(t, common.ValidatePasswordAndHash("enrollment-password", stored.Password))
+	_, _, err = service.ValidateLoginSession(identity)
+	assert.Error(t, err, "reset invalidates previous sessions")
+	response = securityEnrollmentRequest(http.MethodPost, "/api/user/reset", string(body), "", service.AuthIdentity{}, ResetPassword)
+	assert.Contains(t, response.Body.String(), `"success":false`)
+}
+
+func TestMidjourneyImageOwnershipAndCapability(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Midjourney{}, &model.Channel{}))
+	previousMemory := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	previousFetch := *system_setting.GetFetchSetting()
+	system_setting.GetFetchSetting().EnableSSRFProtection = false
+	service.InitHttpClient()
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemory
+		*system_setting.GetFetchSetting() = previousFetch
+	})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("test-image"))
+	}))
+	t.Cleanup(upstream.Close)
+	require.NoError(t, model.DB.Create(&model.Midjourney{UserId: user.Id, MjId: "private-image", ImageUrl: upstream.URL}).Error)
+	for _, test := range []struct {
+		name       string
+		userID     int
+		capability bool
+		status     int
+	}{
+		{"owner", user.Id, false, http.StatusOK},
+		{"different user", user.Id + 1, false, http.StatusNotFound},
+		{"no identity", 0, false, http.StatusNotFound},
+		{"verified image capability", 0, true, http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			identity.UserID = test.userID
+			response := securityEnrollmentRequest(http.MethodGet, "/mj/image/private-image", "", "", identity, func(c *gin.Context) {
+				c.Params = gin.Params{{Key: "id", Value: "private-image"}}
+				c.Set(middleware.TaskArtifactAccessContextKey, test.capability)
+				relay.RelayMidjourneyImage(c)
+			})
+			assert.Equal(t, test.status, response.Code)
+			if test.status == http.StatusOK {
+				assert.Equal(t, "test-image", response.Body.String())
+				assert.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
+			}
+		})
+	}
+}
+
+func TestSecurityAccountSidebarRejectsMalformedSettings(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	for _, value := range []any{12345, "<img src=x onerror=alert(1)>", "[]", `{"console":{"log":"yes"}}`} {
+		body, err := common.Marshal(map[string]any{"sidebar_modules": value})
+		require.NoError(t, err)
+		response := securityEnrollmentRequest(http.MethodPut, "/api/user/self", string(body), "", identity, UpdateSelf)
+		assert.Contains(t, response.Body.String(), `"success":false`)
+	}
+	stored, err := model.GetUserById(user.Id, false)
+	require.NoError(t, err)
+	assert.Equal(t, user.GetSetting().SidebarModules, stored.GetSetting().SidebarModules)
+	response := securityEnrollmentRequest(http.MethodPut, "/api/user/self", `{"sidebar_modules":"{\"console\":{\"log\":false}}"}`, "", identity, UpdateSelf)
+	assert.Contains(t, response.Body.String(), `"success":true`)
+}
+
+func TestSecurityAccountUsernameChangeRequiresProofBoundToTheNewName(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	response := securityEnrollmentRequest(http.MethodPut, "/api/user/self", `{"username":"renamed"}`, "", identity, UpdateSelf)
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	operation := service.VerificationOperation{Scope: service.VerificationScopeUsernameChange, Context: []byte(`{"username":"renamed"}`)}
+	proof := issueSecurityEnrollmentProof(t, identity, operation, service.VerificationMethodPassword)
+	response = securityEnrollmentRequest(http.MethodPut, "/api/user/self", `{"username":"other-name"}`, proof, identity, UpdateSelf)
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	proof = issueSecurityEnrollmentProof(t, identity, operation, service.VerificationMethodPassword)
+	response = securityEnrollmentRequest(http.MethodPut, "/api/user/self", `{"username":"renamed"}`, proof, identity, UpdateSelf)
+	require.Contains(t, response.Body.String(), `"success":true`, response.Body.String())
+	stored, err := model.GetUserById(user.Id, false)
+	require.NoError(t, err)
+	assert.Equal(t, "renamed", stored.Username)
+	assert.Equal(t, user.Id, stored.Id)
+	secondOperation := service.VerificationOperation{Scope: service.VerificationScopeUsernameChange, Context: []byte(`{"username":"second-name"}`)}
+	secondProof := issueSecurityEnrollmentProof(t, identity, secondOperation, service.VerificationMethodPassword)
+	response = securityEnrollmentRequest(http.MethodPut, "/api/user/self", `{"username":"second-name"}`, secondProof, identity, UpdateSelf)
+	require.Contains(t, response.Body.String(), `"success":true`)
+	response = securityEnrollmentRequest(http.MethodPut, "/api/user/self", `{"username":"renamed"}`, proof, identity, UpdateSelf)
+	assert.Equal(t, http.StatusForbidden, response.Code)
 }
 
 func TestSecurityAccountProfileUpdateDoesNotRequireProof(t *testing.T) {

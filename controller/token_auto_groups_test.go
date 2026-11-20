@@ -34,6 +34,33 @@ func configureTokenAutoGroupsTest(t *testing.T, maxCount string, autoGroups stri
 	})
 }
 
+func TestTokenFixedGroupsMustBeSelectableAtCreationAndUpdate(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	token := &model.Token{UserId: user.Id, Key: "test-only-existing-key", Name: "existing", Group: "default", Status: common.TokenStatusEnabled, UnlimitedQuota: true, ExpiredTime: -1}
+	require.NoError(t, model.DB.Create(token).Error)
+	for _, group := range []string{"admin", "undefined", "vip"} {
+		for _, update := range []bool{false, true} {
+			request := map[string]any{"id": token.Id, "name": "candidate", "group": group, "unlimited_quota": true, "expired_time": -1}
+			ctx, response := newTokenAutoGroupsAuthenticatedContext(t, http.MethodPost, "/api/token/", request, user.Id)
+			if update {
+				UpdateToken(ctx)
+			} else {
+				AddToken(ctx)
+			}
+			if group == "vip" {
+				assert.Equal(t, http.StatusOK, response.Code)
+				assert.Contains(t, response.Body.String(), `"success":true`)
+			} else {
+				assert.Equal(t, http.StatusForbidden, response.Code)
+				var count int64
+				require.NoError(t, model.DB.Model(&model.Token{}).Where(map[string]any{"group": group}).Count(&count).Error)
+				assert.Zero(t, count)
+			}
+		}
+	}
+}
+
 func stringInt(value int) string {
 	return fmt.Sprintf("%d", value)
 }

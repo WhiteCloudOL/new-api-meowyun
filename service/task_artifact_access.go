@@ -23,6 +23,20 @@ const (
 
 var ErrTaskArtifactAccessInvalid = errors.New("task artifact access is invalid")
 
+// BuildMidjourneyImageURL keeps browser image links usable without exposing a
+// relay key. The existing artifact capability is bound to this image only.
+func BuildMidjourneyImageURL(taskID string) string {
+	base := strings.TrimRight(system_setting.ServerAddress, "/")
+	if ValidateTaskArtifactBaseURL(base) != nil {
+		return ""
+	}
+	access, err := IssueTaskArtifactAccess(taskID, "midjourney-image")
+	if err != nil {
+		return ""
+	}
+	return base + "/mj/image/" + url.PathEscape(taskID) + "?" + TaskArtifactAccessQueryParameter + "=" + url.QueryEscape(access)
+}
+
 func taskArtifactAccessMessage(taskID, artifactKey string) []byte {
 	return []byte(taskArtifactAccessVersion + "\x00" + taskID + "\x00" + artifactKey)
 }

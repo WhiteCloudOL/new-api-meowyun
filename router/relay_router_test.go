@@ -146,6 +146,24 @@ func TestGeminiRelayHandsLongRunningPredictionToPluginRoute(t *testing.T) {
 	}
 }
 
+func TestMidjourneyImageRequiresAuthenticationAndRejectsArbitraryPrefixes(t *testing.T) {
+	engine := gin.New()
+	SetRelayRouter(engine)
+	for _, path := range []string{"/mj/image/image-task", "/fast/mj/image/image-task", "/relax/mj/image/image-task", "/turbo/mj/image/image-task", "/v1/mj/image/image-task"} {
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code, path)
+	}
+	for _, path := range []string{"/anything/mj/image/image-task", "/api/mj/image/image-task"} {
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusNotFound, recorder.Code, path)
+	}
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/mj/image/image-task?access=forged", nil))
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+}
+
 func setupRelayRouterTestDB(t *testing.T) {
 	t.Helper()
 

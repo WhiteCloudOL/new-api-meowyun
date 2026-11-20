@@ -38,6 +38,7 @@ export type SecurityProofScope =
   | 'account.binding.unbind'
   | 'account.password.set'
   | 'account.password.change'
+  | 'account.username.change'
   | 'account.delete'
   | 'admin.user.create'
   | 'admin.user.update'
@@ -51,6 +52,7 @@ export type SecurityProofScope =
 export type AdminUserManageAction = 'disable' | 'enable' | 'promote' | 'demote'
 
 export type VerificationOperation =
+  | { scope: 'account.username.change'; context: { username: string } }
   | { scope: 'channel.key.read'; context: { channel_id: number } }
   | {
       scope: 'account.binding.bind'
@@ -94,6 +96,7 @@ export type VerificationOperation =
         | 'channel.key.read'
         | 'account.binding.bind'
         | 'account.binding.unbind'
+        | 'account.username.change'
         | 'access_token.generate'
         | 'access_token.update'
         | 'access_token.revoke'

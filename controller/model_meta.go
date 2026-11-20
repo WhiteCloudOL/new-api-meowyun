@@ -32,7 +32,7 @@ func listModelsMeta(c *gin.Context, keyword, vendor string) {
 	}
 
 	pageInfo := common.GetPageQuery(c)
-	if squareState != "" && (pageInfo.GetPage() < 1 || pageInfo.GetPageSize() < 1) {
+	if squareState != "" && !pageInfo.IsValid() {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid pagination"})
 		return
 	}

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -10,8 +11,13 @@ type PageInfo struct {
 	Page     int `json:"page"`      // page num 页码
 	PageSize int `json:"page_size"` // page size 页大小
 
-	Total int `json:"total"` // 总条数，后设置
-	Items any `json:"items"` // 数据，后设置
+	Total        int `json:"total"` // 总条数，后设置
+	Items        any `json:"items"` // 数据，后设置
+	invalidInput bool
+}
+
+func (p *PageInfo) IsValid() bool {
+	return !p.invalidInput && p.Page > 0 && p.PageSize > 0
 }
 
 func (p *PageInfo) GetStartIdx() int {
@@ -77,6 +83,10 @@ func GetPageQuery(c *gin.Context) *PageInfo {
 	if pageInfo.PageSize > 100 {
 		pageInfo.PageSize = 100
 	}
+	pageInfo.invalidInput = pageInfo.Page < 1 || pageInfo.PageSize < 1
+	pageInfo.PageSize = max(1, pageInfo.PageSize)
+	// Bound both offset and end-index arithmetic, including oversized inputs.
+	pageInfo.Page = min(max(1, pageInfo.Page), math.MaxInt/pageInfo.PageSize)
 
 	return pageInfo
 }

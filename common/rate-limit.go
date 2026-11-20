@@ -78,6 +78,18 @@ type InMemoryRateLimiter struct {
 	expirationDuration time.Duration
 }
 
+// Reset clears completed attempts after the account authenticates. Active
+// reservations remain tracked independently until their owners finish.
+func (l *InMemoryRateLimiter) Reset(key string) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if entry := l.store[key]; entry != nil {
+		l.lru.Remove(entry.element)
+		entry.requests.clear()
+		delete(l.store, key)
+	}
+}
+
 // Init initializes the limiter once. Repeated calls leave the first configuration unchanged.
 func (l *InMemoryRateLimiter) Init(expirationDuration time.Duration) {
 	l.mutex.Lock()

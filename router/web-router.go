@@ -36,7 +36,12 @@ func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.Han
 		middleware.Cache(),
 		middleware.ServeFrontendFiles(frontendFS),
 		func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+			requestPath := c.Request.URL.Path
+			reserved := strings.HasPrefix(requestPath, "/v1") || strings.HasPrefix(requestPath, "/api") || strings.HasPrefix(requestPath, "/assets") || strings.Contains(requestPath, "/mj/")
+			for _, prefix := range []string{"/.env", "/.git", "/.svn", "/debug/pprof", "/metrics", "/config.yaml", "/config.yml", "/docker-compose.yml", "/docker-compose.yaml"} {
+				reserved = reserved || strings.HasPrefix(requestPath, prefix)
+			}
+			if reserved {
 				controller.RelayNotFound(c)
 				return
 			}

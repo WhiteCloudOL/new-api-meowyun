@@ -1116,7 +1116,7 @@ func performPluginRequest(handler http.Handler, method, path string) *httptest.R
 func TestWebFallbackDoesNotCacheMissingAPIOrAssets(t *testing.T) {
 	outer := gin.New()
 	SetWebRouter(outer, WebAssets{IndexPage: []byte("dashboard")}, func(c *gin.Context) { c.Next() })
-	for _, path := range []string{"/api/user/token/status", "/api/audit/self?p=1", "/v1/missing", "/assets/missing.js"} {
+	for _, path := range []string{"/api/user/token/status", "/api/audit/self?p=1", "/v1/missing", "/assets/missing.js", "/.env", "/.git/config", "/config.yaml", "/docker-compose.yml", "/debug/pprof/heap", "/metrics", "/anything/mj/image/unknown"} {
 		t.Run(path, func(t *testing.T) {
 			response := performPluginRequest(outer, http.MethodGet, path)
 			assert.Equal(t, http.StatusNotFound, response.Code)

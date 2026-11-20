@@ -72,6 +72,20 @@ var defNext = func(c *gin.Context) {
 	c.Next()
 }
 
+func ClearPasswordLoginAttempts(c *gin.Context, accountID int) {
+	if accountID <= 0 {
+		return
+	}
+	key := redisRateLimitNamespace + ":password-account:" + strconv.Itoa(accountID)
+	if common.RedisEnabled {
+		if common.RDB != nil {
+			_ = common.RDB.Del(c.Request.Context(), key).Err()
+		}
+		return
+	}
+	inMemoryRateLimiter.Reset(key)
+}
+
 func redisIPRateLimitKey(mark string, clientIP string) string {
 	return fmt.Sprintf("%s:ip:%s:%s", redisRateLimitNamespace, mark, clientIP)
 }
@@ -138,6 +152,9 @@ func redisFixedWindowTake(ctx context.Context, key string, maxRequestNum int, du
 }
 
 func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
+	if mark == "CT" {
+		mark += ":" + c.FullPath()
+	}
 	allowed, _, ttlSeconds, err := redisFixedWindowTake(
 		c.Request.Context(),
 		redisIPRateLimitKey(mark, c.ClientIP()),
@@ -156,6 +173,9 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 }
 
 func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
+	if mark == "CT" {
+		mark += ":" + c.FullPath()
+	}
 	key := mark + c.ClientIP()
 	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
 		writeRateLimited(c, duration)
@@ -222,6 +242,37 @@ func CriticalRateLimit() func(c *gin.Context) {
 		return rateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "CT")
 	}
 	return defNext
+}
+
+// EmailRecipientRateLimit bounds mailbox traffic across source IPs and both
+// public mail flows. Redis failures reject issuance instead of bypassing it.
+func EmailRecipientRateLimit() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		email := strings.ToLower(strings.TrimSpace(c.Query("email")))
+		if email == "" {
+			c.Next()
+			return
+		}
+		key := redisRateLimitNamespace + ":email-recipient:" + common.GenerateHMAC(email)
+		if common.RedisEnabled {
+			allowed, _, ttl, err := redisFixedWindowTake(c.Request.Context(), key, 2, 600)
+			if err != nil {
+				c.AbortWithStatus(http.StatusServiceUnavailable)
+				return
+			}
+			if !allowed {
+				writeRateLimited(c, ttl)
+				return
+			}
+		} else {
+			inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+			if !inMemoryRateLimiter.Request(key, 2, 600) {
+				writeRateLimited(c, 600)
+				return
+			}
+		}
+		c.Next()
+	}
 }
 
 func UserCriticalRateLimit(scope string) func(c *gin.Context) {

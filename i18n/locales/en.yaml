@@ -70,6 +70,7 @@ email.security_notice.subject: "{{.SystemName}} — Account security notificatio
 email.security_notice.changed: "Your account security settings have changed: {{.Event}}."
 email.security_notice.advice: "If you did not make this change, open your account security settings, revoke other login sessions, and contact your administrator."
 email.security_event.password_updated: "Password updated"
+email.security_event.username_updated: "Username updated"
 email.security_event.email_change_requested: "A change of your email address was requested"
 email.security_event.email_changed: "Email address changed"
 email.security_event.email_confirmed: "Email address confirmed"

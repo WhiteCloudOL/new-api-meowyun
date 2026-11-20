@@ -212,11 +212,14 @@ func main() {
 	}
 
 	// Initialize HTTP server
+	InjectUmamiAnalytics()
+	InjectGoogleAnalytics()
 	server := gin.New()
 	if err := middleware.ConfigureTrustedProxies(server); err != nil {
 		common.FatalLog(common.LogText("failed to configure trusted proxies: %s", err.Error()))
 		return
 	}
+	server.Use(middleware.SecurityHeaders(indexPage))
 	server.Use(middleware.PanicRecover())
 	// This will cause SSE not to work!!!
 	//server.Use(gzip.Gzip(gzip.DefaultCompression))
@@ -224,8 +227,6 @@ func main() {
 	server.Use(middleware.Version())
 	server.Use(middleware.I18n())
 	middleware.SetUpLogger(server)
-	InjectUmamiAnalytics()
-	InjectGoogleAnalytics()
 
 	// 设置路由
 	router.SetRouter(server, router.WebAssets{

@@ -35,13 +35,50 @@ func TestPasswordAccountRateLimitSurvivesIPAndAliasChanges(t *testing.T) {
 			assert.NotEmpty(t, response.Header().Get("Retry-After"))
 		}
 	}
-	server.FastForward(10 * time.Minute)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/login", nil)
+	ClearPasswordLoginAttempts(c, 42)
+	assert.True(t, TakePasswordLoginAttempt(c, 42, "original-alias"), "successful authentication clears previous failures")
+	server.FastForward(10 * time.Minute)
+	c, _ = gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/login", nil)
 	assert.True(t, TakePasswordLoginAttempt(c, 42, "original-alias"))
 	require.NoError(t, client.Close())
 	assert.False(t, TakePasswordLoginAttempt(c, 43, "another-user"), "Redis failures must not bypass the account limit")
 	assert.Equal(t, http.StatusServiceUnavailable, c.Writer.Status())
+}
+
+func TestEmailRecipientRateLimitSurvivesSourceAndRouteChanges(t *testing.T) {
+	_, client := useRateLimitMiniRedis(t)
+	router := gin.New()
+	router.Use(EmailRecipientRateLimit())
+	for _, path := range []string{"/verification", "/reset_password"} {
+		router.GET(path, func(c *gin.Context) { c.Status(http.StatusOK) })
+	}
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/verification?email=Person@example.test", "192.0.2.1:1234").Code)
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/reset_password?email=person@example.test", "192.0.2.2:1234").Code)
+	blocked := performRateLimitRequest(router, "/verification?email=person@example.test", "192.0.2.3:1234")
+	assert.Equal(t, http.StatusTooManyRequests, blocked.Code)
+	assert.NotEmpty(t, blocked.Header().Get("Retry-After"))
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/verification?email=other@example.test", "192.0.2.3:1234").Code)
+	require.NoError(t, client.Close())
+	assert.Equal(t, http.StatusServiceUnavailable, performRateLimitRequest(router, "/verification?email=third@example.test", "192.0.2.4:1234").Code)
+}
+
+func TestCriticalRateLimitSeparatesOperations(t *testing.T) {
+	useRateLimitMiniRedis(t)
+	previousEnabled, previousCount, previousDuration := common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration
+	common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = true, 1, 600
+	t.Cleanup(func() {
+		common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = previousEnabled, previousCount, previousDuration
+	})
+	router := gin.New()
+	for _, path := range []string{"/login", "/reset"} {
+		router.GET(path, CriticalRateLimit(), func(c *gin.Context) { c.Status(http.StatusOK) })
+	}
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/reset", "192.0.2.10:1234").Code)
+	assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, "/reset", "192.0.2.10:1234").Code)
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/login", "192.0.2.10:1234").Code)
 }
 
 func useRateLimitMiniRedis(t *testing.T) (*miniredis.Miniredis, *redis.Client) {

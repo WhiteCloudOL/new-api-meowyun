@@ -232,6 +232,7 @@ var accessTokenVerificationScopes = map[string]string{
 	VerificationScopeTwoFABackupCodes:      "account_security:write",
 	VerificationScopePasswordSet:           "account_security:write",
 	VerificationScopePasswordChange:        "account_security:write",
+	VerificationScopeUsernameChange:        "profile:write",
 	VerificationScopeAccountBind:           "account_security:write",
 	VerificationScopeAccountUnbind:         "account_security:write",
 	VerificationScopeAccountDelete:         "account_security:write",

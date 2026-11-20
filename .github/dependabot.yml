@@ -1,5 +1,17 @@
 version: 2
 updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "gomod"
+    directory: "/relaykit"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "gomod"
+    directory: "/tokenkit"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "bun"
     directory: "/web"
     schedule:

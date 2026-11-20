@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -28,9 +30,14 @@ import (
 
 func RelayMidjourneyImage(c *gin.Context) {
 	taskId := c.Param("id")
-	midjourneyTask := model.GetByOnlyMJId(taskId)
+	var midjourneyTask *model.Midjourney
+	if middleware.IsTaskArtifactAccess(c) {
+		midjourneyTask = model.GetByOnlyMJId(taskId)
+	} else if userID := c.GetInt("id"); userID > 0 {
+		midjourneyTask = model.GetByMJId(userID, taskId)
+	}
 	if midjourneyTask == nil {
-		c.JSON(400, gin.H{
+		c.JSON(http.StatusNotFound, gin.H{
 			"error": "midjourney_task_not_found",
 		})
 		return
@@ -76,9 +83,8 @@ func RelayMidjourneyImage(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		responseBody, _ := io.ReadAll(resp.Body)
 		c.JSON(resp.StatusCode, gin.H{
-			"error": string(responseBody),
+			"error": "http_get_image_failed",
 		})
 		return
 	}
@@ -88,6 +94,14 @@ func RelayMidjourneyImage(c *gin.Context) {
 		// 如果无法确定内容类型，则默认为jpeg
 		contentType = "image/jpeg"
 	}
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	if !strings.HasPrefix(mediaType, "image/") || mediaType == "image/svg+xml" {
+		c.AbortWithStatus(http.StatusBadGateway)
+		return
+	}
+	c.Header("Content-Security-Policy", "sandbox; default-src 'none'")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Referrer-Policy", "no-referrer")
 	// 设置响应的内容类型
 	c.Writer.Header().Set("Content-Type", contentType)
 	// 将图片流式传输到响应体
@@ -151,9 +165,9 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 	midjourneyTask.FinishTime = originTask.FinishTime
 	midjourneyTask.ImageUrl = ""
 	if originTask.ImageUrl != "" && setting.MjForwardUrlEnabled {
-		midjourneyTask.ImageUrl = system_setting.ServerAddress + "/mj/image/" + originTask.MjId
-		if originTask.Status != "SUCCESS" {
-			midjourneyTask.ImageUrl += "?rand=" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		midjourneyTask.ImageUrl = service.BuildMidjourneyImageURL(originTask.MjId)
+		if midjourneyTask.ImageUrl != "" && originTask.Status != "SUCCESS" {
+			midjourneyTask.ImageUrl += "&rand=" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		}
 	} else {
 		midjourneyTask.ImageUrl = originTask.ImageUrl

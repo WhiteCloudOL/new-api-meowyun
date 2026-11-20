@@ -110,24 +110,26 @@ func TestTaskArtifactAccessLimiterDefaults(t *testing.T) {
 	assert.True(t, rateLimiter.invalidAttempt(now.Add(time.Minute), "192.0.2.10"))
 }
 
-func TestRedactTaskArtifactAccessAlsoCoversLegacyVideoRoute(t *testing.T) {
+func TestRedactTaskArtifactAccessAlsoCoversLegacyVideoAndMidjourneyRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(redactTaskArtifactAccessQuery())
-	router.GET("/v1/videos/:task_id/content", func(c *gin.Context) {
-		assert.NotContains(t, c.Request.URL.RawQuery, "access")
-		assert.NotContains(t, c.Request.RequestURI, "secret-capability")
-		assert.Equal(t, "ok", c.Query("keep"))
-		c.Status(http.StatusNoContent)
-	})
-	request := httptest.NewRequest(
-		http.MethodGet,
-		"/v1/videos/task-1/content?access=secret-capability&keep=ok",
-		nil,
-	)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	for _, path := range []string{"/v1/videos/task-1/content", "/mj/image/task-1", "/fast/mj/image/task-1"} {
+		router := gin.New()
+		router.Use(redactTaskArtifactAccessQuery())
+		router.GET(path, func(c *gin.Context) {
+			assert.NotContains(t, c.Request.URL.RawQuery, "access")
+			assert.NotContains(t, c.Request.RequestURI, "secret-capability")
+			assert.Equal(t, "ok", c.Query("keep"))
+			c.Status(http.StatusNoContent)
+		})
+		request := httptest.NewRequest(
+			http.MethodGet,
+			path+"?access=secret-capability&keep=ok",
+			nil,
+		)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+	}
 }
 
 func TestSetUpLoggerNeverWritesTaskArtifactAccess(t *testing.T) {

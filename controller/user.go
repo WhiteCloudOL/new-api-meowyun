@@ -107,6 +107,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	middleware.ClearPasswordLoginAttempts(c, user.Id)
 	setupLogin(&user, nil, c)
 }
 
@@ -264,7 +265,7 @@ func Register(c *gin.Context) {
 			common.ApiErrorT(c, "Email verification is enabled, please enter email address and verification code")
 			return
 		}
-		if !common.VerifyCodeWithKey(user.Email, user.VerificationCode, common.EmailVerificationPurpose) {
+		if !common.ConsumeVerificationCodeWithKey(user.Email, user.VerificationCode, common.EmailVerificationPurpose) {
 			common.ApiErrorT(c, "Verification code is incorrect or has expired")
 			return
 		}
@@ -819,6 +820,18 @@ func UpdateSelf(c *gin.Context) {
 	}
 	// 检查是否是用户设置更新请求 (sidebar_modules 或 language)
 	if sidebarModules, sidebarExists := requestData["sidebar_modules"]; sidebarExists && !passwordRequested {
+		sidebarModulesStr, ok := sidebarModules.(string)
+		if !ok || len(sidebarModulesStr) > 16<<10 {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		if sidebarModulesStr != "" {
+			var modules map[string]map[string]bool
+			if err := common.UnmarshalJsonStr(sidebarModulesStr, &modules); err != nil || modules == nil {
+				common.ApiErrorT(c, "Invalid parameters")
+				return
+			}
+		}
 		userId := c.GetInt("id")
 		user, err := model.GetUserById(userId, false)
 		if err != nil {
@@ -830,9 +843,7 @@ func UpdateSelf(c *gin.Context) {
 		currentSetting := user.GetSetting()
 
 		// 更新sidebar_modules字段
-		if sidebarModulesStr, ok := sidebarModules.(string); ok {
-			currentSetting.SidebarModules = sidebarModulesStr
-		}
+		currentSetting.SidebarModules = sidebarModulesStr
 
 		if err := model.UpdateUserSetting(user.Id, currentSetting); err != nil {
 			common.ApiErrorT(c, "Update failed")
@@ -937,9 +948,33 @@ func UpdateSelf(c *gin.Context) {
 		})
 		return
 	}
+	var renamedUser *model.User
+	if cleanUser.Username != "" {
+		cleanUser.Username = strings.TrimSpace(cleanUser.Username)
+		current, err := model.GetUserById(cleanUser.Id, false)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if cleanUser.Username != current.Username {
+			context, err := common.Marshal(service.UsernameChangeContext{Username: cleanUser.Username})
+			if err != nil {
+				common.ApiErrorT(c, "Invalid parameters")
+				return
+			}
+			if middleware.RequireSecurityProof(c, service.VerificationOperation{Scope: service.VerificationScopeUsernameChange, Context: context}) == nil {
+				return
+			}
+			renamedUser = current
+		}
+	}
 	if err := cleanUser.Update(false); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if renamedUser != nil {
+		recordUserSecurityAudit(c, cleanUser.Id, "user.username_change", map[string]any{"success": true})
+		_ = service.NotifyAccountSecurityChange(service.AccountMailLanguage(c, cleanUser.Id), renamedUser.Email, i18n.MsgSecurityEventUsernameUpdated)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})

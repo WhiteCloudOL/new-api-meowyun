@@ -494,6 +494,18 @@ func TestSearchTokensMasksKeyInResponse(t *testing.T) {
 	}
 }
 
+func TestGetTokenRejectsMissingAndOtherUsersTokensWithNotFound(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "private-token", "test-only-token-value")
+	for _, id := range []int{token.Id, token.Id + 100} {
+		c, response := newAuthenticatedContext(t, http.MethodGet, "/api/token/"+strconv.Itoa(id), nil, 2)
+		c.Params = gin.Params{{Key: "id", Value: strconv.Itoa(id)}}
+		GetToken(c)
+		assert.Equal(t, http.StatusNotFound, response.Code)
+		assert.NotContains(t, response.Body.String(), token.Key)
+	}
+}
+
 func TestGetTokenMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "detail-token", "qrst1234uvwx5678")
