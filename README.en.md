@@ -162,6 +162,25 @@ Accounts, channels, plugin installation states, usage, prices, and costs shown b
 
 This README describes the current source tree. Check the release notes for the version you deploy.
 
+### BreezeTTS in this fork
+
+Use [Breeze-TTS-2.cpp v0.1.7-with-auth.2 or later](https://github.com/WhiteCloudOL/Breeze-TTS-2.cpp/releases/tag/v0.1.7-with-auth.2)
+for per-account voice libraries. The BreezeTTS Windows auth launcher reads a
+dedicated gateway key from `.env.new-api-key`. For a manual `--auth` launch,
+set `BREEZE_GATEWAY_API_KEY_FILE` to the key file.
+
+In the New API console, add a **Task Plugin** channel bound to `breeze-tts`.
+Enter the private BreezeTTS Base URL reachable from New API (ending in `/v1`)
+and copy a dedicated gateway key into the channel's API Key field. Enable
+`breeze-tts-2` for the appropriate groups and configure its price.
+
+Clients use their New API-issued key with permission for `breeze-tts-2`.
+They manage voices under `/v1/voices` and synthesize with `/v1/audio/speech`
+using OpenAI JSON or native form data. Keys from the same account share its
+voice library. Direct BreezeTTS clients keep their original keys and voice
+library. See the [fork notes](./CUSTOM_CHANGES.md#2026-11-20-breezetts-voice-libraries-by-account)
+for persistence and upgrade behavior.
+
 <a id="quick-start"></a>
 
 ## Quick start
