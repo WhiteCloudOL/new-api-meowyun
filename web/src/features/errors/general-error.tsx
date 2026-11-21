@@ -21,9 +21,10 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { FORK_REPOSITORY_URL } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
-const FEEDBACK_URL = 'https://github.com/QuantumNous/new-api/issues'
+const FEEDBACK_URL = `${FORK_REPOSITORY_URL}/issues`
 
 type GeneralErrorProps = React.HTMLAttributes<HTMLDivElement> & {
   minimal?: boolean

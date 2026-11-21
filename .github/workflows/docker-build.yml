@@ -55,6 +55,7 @@ jobs:
           fi
           echo "TAG=${TAG}" >> $GITHUB_ENV
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "${TAG}" > VERSION
           echo "Building tag: ${TAG} for ${{ matrix.arch }}"
 
@@ -78,6 +79,7 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          build-args: SOURCE_COMMIT=${{ steps.version.outputs.commit }}
           platforms: ${{ matrix.platform }}
           push: true
           tags: |

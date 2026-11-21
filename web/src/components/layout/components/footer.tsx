@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { HtmlContent } from '@/components/html-content'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { DEFAULT_LOGO, FORK_REPOSITORY_URL } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 interface FooterLink {
@@ -42,12 +43,6 @@ interface FooterProps {
   copyright?: string
   className?: string
 }
-
-const NEW_API_FOOTER_ATTRIBUTION_KEY = [
-  'footer',
-  'new' + 'api',
-  'projectAttributionSuffix',
-].join('.')
 
 function FooterLinkItem(props: { link: FooterLink }) {
   const { t } = useTranslation()
@@ -122,30 +117,41 @@ function LegalLinks(props: { leadingSeparator?: boolean }) {
   )
 }
 
-// inline=true returns just the inner span for composition in a parent flex
-// row. inline=false wraps in a centered/right-aligned div (default).
-function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
+function ProjectAttribution() {
   const { t } = useTranslation()
-  const content = (
-    <span className='text-muted-foreground/45'>
-      &copy; {props.currentYear}{' '}
-      <a
-        href='https://github.com/QuantumNous/new-api'
-        target='_blank'
-        rel='noopener noreferrer'
-        className='text-foreground/70 hover:text-foreground font-medium transition-colors'
-      >
-        {t('New API')}
-      </a>
-      . {t(NEW_API_FOOTER_ATTRIBUTION_KEY)}
-    </span>
-  )
-  if (props.inline) {
-    return content
-  }
+  const revision = import.meta.env.VITE_SOURCE_COMMIT
   return (
-    <div className='text-muted-foreground/45 text-center text-xs sm:text-right'>
-      {content}
+    <div className='text-muted-foreground text-center text-xs sm:text-right'>
+      <p lang='en'>Copyright (c) QuantumNous and contributors.</p>
+      <p lang='en'>Frontend design and development by New API contributors.</p>
+      <div className='mt-2 flex flex-wrap justify-center gap-x-3 gap-y-1 sm:justify-end'>
+        <a
+          href='https://github.com/QuantumNous/new-api'
+          target='_blank'
+          rel='noopener noreferrer'
+          className='hover:text-foreground underline underline-offset-2'
+        >
+          {t('New API')}
+        </a>
+        <a
+          href={FORK_REPOSITORY_URL}
+          target='_blank'
+          rel='noopener noreferrer'
+          className='hover:text-foreground underline underline-offset-2'
+        >
+          {t('Fork repository')}
+        </a>
+        {revision && /^[0-9a-f]{40}$/.test(revision) && (
+          <a
+            href={`${FORK_REPOSITORY_URL}/archive/${revision}.zip`}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='hover:text-foreground underline underline-offset-2'
+          >
+            {t('Download deployed source')}
+          </a>
+        )}
+      </div>
     </div>
   )
 }
@@ -159,7 +165,7 @@ export function Footer(props: FooterProps) {
     demoSiteEnabled,
   } = useSystemConfig()
 
-  const displayLogo = systemLogo || props.logo || '/logo.png'
+  const displayLogo = systemLogo || props.logo || DEFAULT_LOGO
   const displayName = systemName || props.name || 'New API'
   const isDemoSiteMode = Boolean(demoSiteEnabled)
   const currentYear = new Date().getFullYear()
@@ -239,7 +245,7 @@ export function Footer(props: FooterProps) {
             />
             <div className='border-border/60 text-muted-foreground/45 flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t pt-4 text-xs sm:w-auto sm:justify-end sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5'>
               <LegalLinks />
-              <ProjectAttribution currentYear={currentYear} inline />
+              <ProjectAttribution />
             </div>
           </div>
         </div>
@@ -301,7 +307,7 @@ export function Footer(props: FooterProps) {
             </span>
             <LegalLinks leadingSeparator />
           </div>
-          <ProjectAttribution currentYear={currentYear} />
+          <ProjectAttribution />
         </div>
       </div>
     </footer>

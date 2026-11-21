@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { PublicLayout } from '@/components/layout'
 import { RichContent } from '@/components/rich-content'
 import { Skeleton } from '@/components/ui/skeleton'
+import { FORK_REPOSITORY_URL } from '@/lib/constants'
 import { isHttpUrl, isLikelyHtml } from '@/lib/content-format'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
@@ -50,12 +51,12 @@ function EmptyAboutState() {
           <p>
             {t('New API Project Repository:')}{' '}
             <a
-              href='https://github.com/QuantumNous/new-api'
+              href={FORK_REPOSITORY_URL}
               target='_blank'
               rel='noopener noreferrer'
               className='text-primary hover:underline'
             >
-              {t('https://github.com/QuantumNous/new-api')}
+              {FORK_REPOSITORY_URL}
             </a>
           </p>
           <p className='text-muted-foreground'>
@@ -98,7 +99,7 @@ function EmptyAboutState() {
           <p className='text-muted-foreground'>
             {t('This project must be used in compliance with the')}{' '}
             <a
-              href='https://github.com/QuantumNous/new-api/blob/main/LICENSE'
+              href={`${FORK_REPOSITORY_URL}/blob/main/LICENSE`}
               target='_blank'
               rel='noopener noreferrer'
               className='text-primary hover:underline'

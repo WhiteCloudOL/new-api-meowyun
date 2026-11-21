@@ -31,6 +31,7 @@ vi.mock('@/hooks/use-system-config', () => ({
 vi.mock('@/hooks/use-status', () => ({ useStatus: () => ({ status: {} }) }))
 
 afterEach(cleanup)
+afterEach(() => vi.unstubAllEnvs())
 
 test('custom footer renders safe HTML and project attribution while removing executable content', () => {
   const { container } = render(<Footer />)
@@ -41,4 +42,38 @@ test('custom footer renders safe HTML and project attribution while removing exe
   expect(
     container.querySelector('a[href="https://github.com/QuantumNous/new-api"]')
   ).not.toBeNull()
+  expect(
+    screen.getByText('Frontend design and development by New API contributors.')
+  ).toBeTruthy()
+  expect(
+    screen.getByText('Copyright (c) QuantumNous and contributors.')
+  ).toBeTruthy()
+})
+
+test('the deployed source link downloads the exact build revision from the fork', () => {
+  const revision = '0123456789abcdef0123456789abcdef01234567'
+  vi.stubEnv('VITE_SOURCE_COMMIT', revision)
+
+  render(<Footer />)
+
+  expect(
+    screen
+      .getByRole('link', { name: 'Download deployed source' })
+      .getAttribute('href')
+  ).toBe(
+    `https://github.com/WhiteCloudOL/new-api-meowyun/archive/${revision}.zip`
+  )
+})
+
+test('a build without a valid revision links to the fork without offering an exact download', () => {
+  vi.stubEnv('VITE_SOURCE_COMMIT', 'main')
+
+  render(<Footer />)
+
+  expect(
+    screen.queryByRole('link', { name: 'Download deployed source' })
+  ).toBeNull()
+  expect(
+    screen.getByRole('link', { name: 'Fork repository' }).getAttribute('href')
+  ).toBe('https://github.com/WhiteCloudOL/new-api-meowyun')
 })
