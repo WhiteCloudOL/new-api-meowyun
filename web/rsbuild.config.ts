@@ -53,6 +53,11 @@ export default defineConfig(({ envMode }) => {
       },
     },
     source: {
+      define: {
+        'import.meta.env.VITE_SOURCE_COMMIT': JSON.stringify(
+          process.env.VITE_SOURCE_COMMIT ?? ''
+        ),
+      },
       entry: {
         index: './src/main.tsx',
       },
