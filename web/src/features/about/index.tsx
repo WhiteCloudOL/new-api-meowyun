@@ -20,6 +20,10 @@ import { useQuery } from '@tanstack/react-query'
 import {
   ArrowUpRight,
   Construction,
+  Boxes,
+  Cable,
+  Route,
+  Receipt,
   GitFork,
   GitPullRequest,
   History,
@@ -96,6 +100,19 @@ function JournalAbout({ markdown }: { markdown: string }) {
             />
           </section>
         )}
+        <ul className='journal-features'>
+          {[
+            { icon: Boxes, label: t('Unified multimodal access') },
+            { icon: Cable, label: t('OpenAI-compatible API') },
+            { icon: Route, label: t('Channel routing and failover') },
+            { icon: Receipt, label: t('Usage-based billing') },
+          ].map(({ icon: Icon, label }) => (
+            <li key={label}>
+              <Icon aria-hidden='true' />
+              <span>{label}</span>
+            </li>
+          ))}
+        </ul>
         <section className='journal-about-credits'>
           <h2>
             <GitPullRequest aria-hidden='true' />

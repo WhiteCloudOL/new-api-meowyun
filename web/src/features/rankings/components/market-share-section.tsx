@@ -21,10 +21,12 @@ import { PieChart } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { VCHART_OPTION } from '@/lib/vchart'
 
 import { formatShare, formatTokens } from '../lib/format'
+import { journalChartPalette, journalStackStyle } from '../lib/journal-chart'
 import type { RankingPeriod, VendorRanking, VendorShareSeries } from '../types'
 import { VendorLink } from './entity-links'
 
@@ -102,20 +104,28 @@ type MarketShareSectionProps = {
  */
 export function MarketShareSection(props: MarketShareSectionProps) {
   const { t } = useTranslation()
+  const { customization } = useThemeCustomization()
+  const journal = customization.preset === 'meowyun-journal'
   const { resolvedTheme, themeReady } = useChartTheme()
+  const lightText = journal ? '#735766' : 'rgba(15, 23, 42, 0.58)'
+  const lightGrid = journal
+    ? 'rgba(219,112,147,0.12)'
+    : 'rgba(15, 23, 42, 0.12)'
   const chartTextColor =
-    resolvedTheme === 'dark'
-      ? 'rgba(255, 255, 255, 0.68)'
-      : 'rgba(15, 23, 42, 0.58)'
+    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.68)' : lightText
   const chartGridColor =
-    resolvedTheme === 'dark'
-      ? 'rgba(255, 255, 255, 0.12)'
-      : 'rgba(15, 23, 42, 0.12)'
+    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : lightGrid
 
-  const colourMap = useMemo(
-    () => buildVendorColourMap(props.history.vendors.map((v) => v.name)),
-    [props.history]
-  )
+  const colourMap = useMemo(() => {
+    const names = props.history.vendors.map((v) => v.name)
+    if (!journal) return buildVendorColourMap(names)
+    return Object.fromEntries(
+      names.map((name, i) => [
+        name,
+        journalChartPalette[i % journalChartPalette.length],
+      ])
+    )
+  }, [props.history, journal])
 
   const orderedPoints = useMemo(() => {
     const order = new Map(
@@ -138,6 +148,7 @@ export function MarketShareSection(props: MarketShareSectionProps) {
       seriesField: 'vendor',
       stack: true,
       paddingInner: 0.12,
+      ...(journal && journalStackStyle),
       legends: { visible: false },
       color: { specified: colourMap },
       axes: [
@@ -204,7 +215,7 @@ export function MarketShareSection(props: MarketShareSectionProps) {
       },
       animationAppear: { duration: 500 },
     }
-  }, [chartGridColor, chartTextColor, colourMap, orderedPoints])
+  }, [journal, chartGridColor, chartTextColor, colourMap, orderedPoints])
 
   const visible = props.rows.slice(0, MAX_VENDORS_IN_LIST)
   const half = Math.ceil(visible.length / 2)
@@ -212,7 +223,7 @@ export function MarketShareSection(props: MarketShareSectionProps) {
   const right = visible.slice(half)
 
   return (
-    <section className='bg-card overflow-hidden rounded-lg border'>
+    <section className='journal-ranking-card bg-card overflow-hidden rounded-lg border'>
       {/* Chart block ----------------------------------------------------- */}
       <header className='px-5 py-4'>
         <h2 className='text-foreground inline-flex items-center gap-2 text-base font-semibold'>

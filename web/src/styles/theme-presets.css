@@ -34,24 +34,24 @@ For commercial licensing, please contact support@quantumnous.com
 
 /* MeowYun Journal */
 [data-theme-preset='meowyun-journal'] {
-  --background: #fffaf8;
-  --foreground: #362c36;
+  --background: #fffcfa;
+  --foreground: #3d2c35;
   --card: #fffefd;
   --card-foreground: var(--foreground);
   --popover: var(--card);
   --popover-foreground: var(--foreground);
-  --primary: #9c345b;
+  --primary: #a84052;
   --primary-foreground: #fffafd;
-  --secondary: #f6e9ed;
+  --secondary: #fcf0ee;
   --secondary-foreground: #633c4b;
   --muted: #f6efee;
-  --muted-foreground: #73616b;
-  --accent: #f9e1e9;
-  --accent-foreground: #71324f;
+  --muted-foreground: #7a616e;
+  --accent: #ffedea;
+  --accent-foreground: #793e43;
   --border: #e8dadd;
   --input: #d8c1c9;
-  --ring: #b75178;
-  --sidebar: #fdf4f4;
+  --ring: #b64f60;
+  --sidebar: #fff8f6;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -93,7 +93,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 .journal-actions a[href='/pricing'],
 [data-theme-preset='meowyun-journal'] header a[href='/sign-in'] {
-  background: linear-gradient(130deg, #a52f5a, #ba426e);
+  background: linear-gradient(130deg, #ad4050, #b94a58);
   color: white;
   box-shadow:
     inset 0 1px 0 #ffffff65,
@@ -530,7 +530,7 @@ For commercial licensing, please contact support@quantumnous.com
  *   - `simple-large`: keeps intentionally neutral, high-contrast surfaces. */
 [data-theme-preset]:not([data-theme-preset='default']):not(
   [data-theme-preset='anthropic']
-):not([data-theme-preset='simple-large']) {
+):not([data-theme-preset='simple-large']):not([data-theme-preset='meowyun-journal']) {
   --card: color-mix(in oklch, var(--primary) 3%, var(--background));
   --popover: color-mix(in oklch, var(--primary) 5%, var(--background));
   --muted: color-mix(in oklch, var(--primary) 7%, var(--background));
@@ -555,7 +555,7 @@ For commercial licensing, please contact support@quantumnous.com
 .dark
   [data-theme-preset]:not([data-theme-preset='default']):not(
     [data-theme-preset='anthropic']
-  ):not([data-theme-preset='simple-large']) {
+  ):not([data-theme-preset='simple-large']):not([data-theme-preset='meowyun-journal']) {
   --card: color-mix(in oklch, var(--primary) 8%, var(--background));
   --popover: color-mix(in oklch, var(--primary) 12%, var(--background));
   --muted: color-mix(in oklch, var(--primary) 12%, var(--background));

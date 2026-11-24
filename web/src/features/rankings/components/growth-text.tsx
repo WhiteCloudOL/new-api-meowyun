@@ -45,6 +45,7 @@ export function GrowthText(props: GrowthTextProps) {
   const isUp = v > 0
   return (
     <span
+      data-growth={isUp ? 'up' : 'down'}
       className={cn(
         'font-mono tabular-nums',
         isUp

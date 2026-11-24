@@ -32,14 +32,14 @@ import {
 import { useRankings } from './hooks/use-rankings'
 import type { RankingPeriod } from './types'
 
-const VALID_PERIODS: RankingPeriod[] = ['today', 'week', 'month', 'year']
+const VALID_PERIODS = new Set<RankingPeriod>(['today', 'week', 'month', 'year'])
 
 export function Rankings() {
   const { t } = useTranslation()
   const search = useSearch({ from: '/rankings/' })
   const navigate = useNavigate()
 
-  const period: RankingPeriod = VALID_PERIODS.includes(
+  const period: RankingPeriod = VALID_PERIODS.has(
     search.period as RankingPeriod
   )
     ? (search.period as RankingPeriod)
@@ -60,7 +60,7 @@ export function Rankings() {
       <div className='relative'>
         <div
           aria-hidden
-          className='pointer-events-none absolute inset-x-0 top-0 h-[600px] opacity-20 dark:opacity-[0.10]'
+          className='journal-ranking-glow pointer-events-none absolute inset-x-0 top-0 h-[600px] opacity-20 dark:opacity-[0.10]'
           style={{
             background: [
               'radial-gradient(ellipse 60% 50% at 20% 20%, oklch(0.72 0.18 250 / 80%) 0%, transparent 70%)',
@@ -76,9 +76,8 @@ export function Rankings() {
         <PageTransition className='relative mx-auto w-full max-w-[1280px] space-y-8 px-3 pt-16 pb-10 sm:px-6 sm:pt-20 sm:pb-12 xl:px-8'>
           <RankingsHero period={period} onPeriodChange={handlePeriodChange} />
 
-          {rankingsQuery.isLoading ? (
-            <RankingsLoading />
-          ) : !snapshot ? (
+          {rankingsQuery.isLoading && <RankingsLoading />}
+          {!rankingsQuery.isLoading && !snapshot && (
             <RankingsError
               message={
                 rankingsQuery.error instanceof Error
@@ -86,7 +85,8 @@ export function Rankings() {
                   : t('Unable to load rankings data')
               }
             />
-          ) : (
+          )}
+          {!rankingsQuery.isLoading && snapshot && (
             <>
               <ModelsSection
                 history={snapshot.models_history}

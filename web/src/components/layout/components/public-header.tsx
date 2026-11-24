@@ -265,6 +265,8 @@ export function PublicHeader(props: PublicHeaderProps) {
                   <Link
                     key={`${link.title}:${link.href}`}
                     to={link.href}
+                    data-journal-nav={isActive ? 'active' : 'link'}
+                    activeOptions={{ exact: link.href === '/' }}
                     title={t(link.title)}
                     disabled={link.disabled}
                     onClick={(event) => handleNavLinkClick(event, link)}
@@ -395,6 +397,8 @@ export function PublicHeader(props: PublicHeaderProps) {
                 <Link
                   key={`${link.title}:${link.href}`}
                   to={link.href}
+                  data-journal-nav={isActive ? 'active' : 'link'}
+                  activeOptions={{ exact: link.href === '/' }}
                   disabled={link.disabled}
                   onClick={(event) => handleNavLinkClick(event, link, true)}
                   className={linkClassName}

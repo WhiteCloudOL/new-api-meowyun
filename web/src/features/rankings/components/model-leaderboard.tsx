@@ -16,8 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Crown } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
 import { formatTokens } from '../lib/format'
@@ -45,9 +48,13 @@ type ModelLeaderboardProps = {
  */
 export function ModelLeaderboard(props: ModelLeaderboardProps) {
   const limited = props.limit ? props.rows.slice(0, props.limit) : props.rows
-  const half = Math.ceil(limited.length / 2)
-  const left = limited.slice(0, half)
-  const right = limited.slice(half)
+  const { customization } = useThemeCustomization()
+  const podium =
+    customization.preset === 'meowyun-journal' && props.variant !== 'compact'
+  const list = podium ? limited.slice(3) : limited
+  const half = Math.ceil(list.length / 2)
+  const left = list.slice(0, half)
+  const right = list.slice(half)
   const variant = props.variant ?? 'default'
 
   if (limited.length === 0) {
@@ -55,24 +62,49 @@ export function ModelLeaderboard(props: ModelLeaderboardProps) {
   }
 
   return (
-    <div className='grid grid-cols-1 gap-x-8 md:grid-cols-2'>
-      <ModelList rows={left} variant={variant} />
-      {right.length > 0 && <ModelList rows={right} variant={variant} />}
-    </div>
+    <>
+      {podium && (
+        <ModelList rows={limited.slice(0, 3)} variant={variant} podium />
+      )}
+      <div className='grid grid-cols-1 gap-x-8 md:grid-cols-2'>
+        <ModelList
+          rows={left}
+          leaderTokens={podium ? limited[0]?.total_tokens : undefined}
+          variant={variant}
+        />
+        {right.length > 0 && (
+          <ModelList
+            rows={right}
+            leaderTokens={podium ? limited[0]?.total_tokens : undefined}
+            variant={variant}
+          />
+        )}
+      </div>
+    </>
   )
 }
 
 function ModelList(props: {
   rows: ModelRanking[]
+  podium?: boolean
+  leaderTokens?: number
   variant: 'default' | 'compact'
 }) {
   const { t } = useTranslation()
   const compact = props.variant === 'compact'
   return (
-    <ul>
+    <ul className={props.podium ? 'journal-podium' : undefined}>
       {props.rows.map((row) => (
         <li
           key={row.model_name}
+          data-rank={row.rank}
+          style={
+            props.leaderTokens
+              ? ({
+                  '--rank-share': `${Math.min(100, Math.max(0, (100 * row.total_tokens) / props.leaderTokens))}%`,
+                } as CSSProperties)
+              : undefined
+          }
           className={
             compact
               ? 'flex items-center gap-3 py-2'
@@ -80,7 +112,7 @@ function ModelList(props: {
           }
         >
           <span className='text-muted-foreground/80 w-6 shrink-0 text-right font-mono text-xs tabular-nums'>
-            {row.rank}.
+            {props.podium && <Crown aria-hidden='true' size={16} />} {row.rank}.
           </span>
           <span className='shrink-0'>
             {getLobeIcon(row.vendor_icon, compact ? 20 : 22)}

@@ -194,8 +194,8 @@ export function JournalHome({ isAuthenticated }: { isAuthenticated: boolean }) {
         <div className='journal-art' aria-hidden='true'>
           <img
             src={mascot}
-            width={1100}
-            height={826}
+            width={960}
+            height={878}
             fetchPriority='high'
             alt=''
           />
@@ -206,13 +206,7 @@ export function JournalHome({ isAuthenticated }: { isAuthenticated: boolean }) {
       {nav.pricing.enabled && (
         <section className='journal-section'>
           <div className='journal-section-head'>
-            <h2>
-              {t('Model directory')}{' '}
-              <span
-                className='journal-sticker journal-peek'
-                aria-hidden='true'
-              />
-            </h2>
+            <h2>{t('Model directory')}</h2>
             <Link to='/pricing'>
               {t('All models')} <ArrowUpRight size={15} />
             </Link>
@@ -225,6 +219,12 @@ export function JournalHome({ isAuthenticated }: { isAuthenticated: boolean }) {
                 search={filter}
                 className={`journal-entry journal-${tone}`}
               >
+                {path === '/chat/completions' && (
+                  <span
+                    className='journal-sticker journal-peek'
+                    aria-hidden='true'
+                  />
+                )}
                 <span className='journal-entry-icons'>
                   <span className='journal-icon'>
                     <Icon size={24} />
@@ -241,15 +241,26 @@ export function JournalHome({ isAuthenticated }: { isAuthenticated: boolean }) {
             <div className='journal-models'>
               <span>{t('Available Models')}</span>
               <div className='journal-model-strip'>
-                {models.slice(0, 12).map(({ model_name }) => (
-                  <Link
-                    key={model_name}
-                    to='/pricing'
-                    search={{ search: model_name }}
-                  >
-                    {model_name}
-                  </Link>
-                ))}
+                <div className='journal-model-track'>
+                  {[false, true].map((duplicate) => (
+                    <div
+                      className='journal-model-group'
+                      key={String(duplicate)}
+                      aria-hidden={duplicate || undefined}
+                    >
+                      {models.slice(0, 12).map(({ model_name }) => (
+                        <Link
+                          key={model_name}
+                          tabIndex={duplicate ? -1 : undefined}
+                          to='/pricing'
+                          search={{ search: model_name }}
+                        >
+                          {model_name}
+                        </Link>
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -259,8 +270,10 @@ export function JournalHome({ isAuthenticated }: { isAuthenticated: boolean }) {
         <div>
           <Braces size={26} aria-hidden='true' />
           <h2>{t('footer.columns.docs.links.quickStart')}</h2>
-          <p>{t('Copy an example and use your gateway API key')}</p>
-          <span className='journal-sticker journal-dev' aria-hidden='true' />
+          <div className='journal-guide-tip'>
+            <span className='journal-sticker journal-dev' aria-hidden='true' />
+            <p>{t('Copy an example and set API_KEY to your key, meow!')}</p>
+          </div>
         </div>
         <Tabs defaultValue='chat' className='journal-code'>
           <div className='journal-window'>

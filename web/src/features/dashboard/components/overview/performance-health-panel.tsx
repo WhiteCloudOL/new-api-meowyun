@@ -121,7 +121,10 @@ export function PerformanceHealthPanel() {
                     <span className='min-w-0 flex-1 truncate font-mono text-[11px]'>
                       {model.model_name}
                     </span>
-                    <span className='inline-flex shrink-0 items-center gap-1'>
+                    <span
+                      className='journal-health-pill inline-flex shrink-0 items-center gap-1'
+                      title={t('Success rate')}
+                    >
                       <span
                         className={cn(
                           'size-1.5 rounded-full',

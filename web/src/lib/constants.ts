@@ -22,7 +22,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 // System Configuration Defaults
 export const DEFAULT_SYSTEM_NAME = 'New API'
-export const DEFAULT_LOGO = '/meowyun-avatar-journal.png'
+export const DEFAULT_LOGO = '/meowyun-avatar-cel.webp'
 export const FORK_REPOSITORY_URL =
   'https://github.com/WhiteCloudOL/new-api-meowyun'
 

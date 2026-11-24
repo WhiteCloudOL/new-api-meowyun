@@ -29,7 +29,7 @@ For commercial licensing, please contact support@quantumnous.com
   align-items: center;
   gap: clamp(1rem, 3vw, 3rem);
   padding: clamp(1.6rem, 4vw, 4rem);
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--border);
   border-radius: 1.75rem;
   background-color: var(--card);
@@ -280,12 +280,6 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 
-@font-face {
-  font-family: 'Journal Huninn';
-  src: url('../../../assets/journal/journal-headings.ttf') format('truetype');
-  font-weight: 400;
-  font-display: swap;
-}
 .journal-intro h1,
 .journal-section h2 {
   font-family: 'Journal Huninn', ui-rounded, system-ui, sans-serif;
@@ -303,6 +297,7 @@ For commercial licensing, please contact support@quantumnous.com
   padding-block: clamp(1.6rem, 3vw, 3rem) 0;
 }
 .journal-petals {
+  border-radius: inherit;
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -379,7 +374,8 @@ For commercial licensing, please contact support@quantumnous.com
   display: block;
   flex: none;
   background-image: url('../../../assets/journal/stickers.webp');
-  background-size: 200% 100%;
+  background-size: contain;
+  background-repeat: no-repeat;
   aspect-ratio: 1;
 }
 .journal-peek {
@@ -395,14 +391,14 @@ For commercial licensing, please contact support@quantumnous.com
 .journal-entry {
   position: relative;
   isolation: isolate;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 7px 14px -10px #75334a45;
 }
 .journal-entry .journal-watermark {
   position: absolute;
   z-index: -1;
-  bottom: -0.5rem;
-  right: -0.3rem;
+  bottom: 0.3rem;
+  right: 0.35rem;
   width: 4.8rem;
   height: 4.8rem;
   opacity: 0.075;
@@ -632,7 +628,7 @@ For commercial licensing, please contact support@quantumnous.com
     animation-delay: 240ms;
   }
   .journal-art > img {
-    animation: journal-float 5s ease-in-out infinite;
+    animation: journal-float 4.5s ease-in-out infinite;
   }
   .journal-petals i {
     animation: journal-drift 8s ease-in-out infinite alternate;
@@ -667,7 +663,7 @@ For commercial licensing, please contact support@quantumnous.com
   }
   @keyframes journal-float {
     50% {
-      transform: scale(1.012);
+      transform: translateY(-6px);
     }
   }
   @keyframes journal-drift {
@@ -688,5 +684,134 @@ For commercial licensing, please contact support@quantumnous.com
   }
   .journal-entry:hover {
     transform: none;
+  }
+}
+
+.journal-entry .journal-peek {
+  position: absolute;
+  right: 1.45rem;
+  top: -1.85rem;
+  z-index: 1;
+  width: 3.65rem;
+  pointer-events: none;
+  transform: rotate(6deg);
+}
+.journal-guide-tip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.journal-guide-tip .journal-dev {
+  position: static;
+  margin: 0;
+  width: clamp(3rem, 5vw, 4.5rem);
+}
+.journal-guide-tip p {
+  position: relative;
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+  border-radius: 1rem 1rem 1rem 0.2rem;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-size: 0.84rem;
+}
+.journal-guide-tip p::after {
+  content: '';
+  position: absolute;
+  right: -0.48rem;
+  top: 50%;
+  border-block: 0.35rem solid transparent;
+  border-left: 0.55rem solid var(--accent);
+}
+.journal-model-strip {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 5%,
+    black 95%,
+    transparent
+  );
+}
+.journal-model-track {
+  display: flex;
+  width: max-content;
+  min-width: 200%;
+  align-items: center;
+}
+.journal-model-group {
+  flex: 1 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 0.5rem;
+  padding-inline-end: 0.5rem;
+}
+.journal-model-strip:focus-within {
+  overflow-x: auto;
+  mask-image: none;
+}
+.journal-model-strip:focus-within .journal-model-track {
+  animation: none;
+}
+.journal-model-strip:focus-within .journal-model-group[aria-hidden='true'] {
+  display: none;
+}
+.journal-model-strip:focus-within .journal-model-track {
+  min-width: 100%;
+}
+.journal-resources a {
+  border-radius: 18px;
+}
+@media (min-width: 641px) {
+  .journal-art {
+    margin-top: calc(-1 * clamp(1.6rem, 3vw, 3rem) - 0.65rem);
+    clip-path: inset(-2rem -2rem 0);
+    margin-bottom: -1px;
+  }
+  .journal-art > img {
+    width: auto;
+    max-width: 100%;
+    height: clamp(20rem, 36vw, 31rem);
+    object-fit: contain;
+    object-position: center bottom;
+    margin: 0 auto -7px;
+  }
+}
+@media (max-width: 640px) {
+  .journal-entry .journal-peek {
+    width: 2.8rem;
+    top: -1.4rem;
+  }
+  .journal-guide > div:first-child {
+    padding-right: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .journal-model-track {
+    animation: journal-scroll 36s linear infinite;
+  }
+  .journal-model-strip:hover .journal-model-track {
+    animation-play-state: paused;
+  }
+  @keyframes journal-scroll {
+    to {
+      transform: translateX(-50%);
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce), (hover: none) {
+  .journal-model-strip {
+    overflow-x: auto;
+  }
+  .journal-model-strip .journal-model-track {
+    min-width: 100%;
+    animation: none;
+  }
+  .journal-model-group[aria-hidden='true'] {
+    display: none;
   }
 }

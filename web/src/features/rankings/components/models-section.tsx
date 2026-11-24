@@ -21,10 +21,12 @@ import { BarChart3, Trophy } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { VCHART_OPTION } from '@/lib/vchart'
 
 import { formatTokens } from '../lib/format'
+import { journalChartPalette, journalStackStyle } from '../lib/journal-chart'
 import type { ModelHistorySeries, ModelRanking, RankingPeriod } from '../types'
 import { ModelLeaderboard } from './model-leaderboard'
 
@@ -50,15 +52,17 @@ type ModelsSectionProps = {
  */
 export function ModelsSection(props: ModelsSectionProps) {
   const { t } = useTranslation()
+  const { customization } = useThemeCustomization()
+  const journal = customization.preset === 'meowyun-journal'
   const { resolvedTheme, themeReady } = useChartTheme()
+  const lightText = journal ? '#735766' : 'rgba(15, 23, 42, 0.58)'
+  const lightGrid = journal
+    ? 'rgba(219,112,147,0.12)'
+    : 'rgba(15, 23, 42, 0.12)'
   const chartTextColor =
-    resolvedTheme === 'dark'
-      ? 'rgba(255, 255, 255, 0.68)'
-      : 'rgba(15, 23, 42, 0.58)'
+    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.68)' : lightText
   const chartGridColor =
-    resolvedTheme === 'dark'
-      ? 'rgba(255, 255, 255, 0.12)'
-      : 'rgba(15, 23, 42, 0.12)'
+    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : lightGrid
 
   // Order points so the largest model appears at the bottom of every stack.
   const orderedPoints = useMemo(() => {
@@ -86,6 +90,7 @@ export function ModelsSection(props: ModelsSectionProps) {
       yField: 'tokens',
       seriesField: 'model',
       stack: true,
+      ...(journal && { ...journalStackStyle, color: journalChartPalette }),
       legends: { visible: false },
       axes: [
         {
@@ -161,10 +166,10 @@ export function ModelsSection(props: ModelsSectionProps) {
       },
       animationAppear: { duration: 500 },
     }
-  }, [chartGridColor, chartTextColor, orderedPoints, t])
+  }, [journal, chartGridColor, chartTextColor, orderedPoints, t])
 
   return (
-    <section className='bg-card overflow-hidden rounded-lg border'>
+    <section className='journal-ranking-card bg-card overflow-hidden rounded-lg border'>
       {/* Chart block ----------------------------------------------------- */}
       <header className='flex items-start justify-between gap-4 px-5 py-4'>
         <div className='min-w-0 flex-1'>

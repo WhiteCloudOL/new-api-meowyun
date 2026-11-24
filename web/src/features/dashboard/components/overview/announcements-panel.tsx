@@ -70,7 +70,8 @@ export function AnnouncementsPanel() {
       description={t('Latest platform updates and notices')}
       loading={loading}
       empty={!list.length}
-      emptyMessage={t('No announcements at this time')}
+      compactEmpty
+      emptyMessage={t('No news from the noticeboard yet, meow')}
       height='h-72'
       contentClassName='p-0'
     >

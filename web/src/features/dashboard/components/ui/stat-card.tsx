@@ -131,7 +131,12 @@ function buildLineSparkline(values?: number[]) {
   })
 
   const linePath = points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+    .map((point, index) => {
+      const previous = points[index - 1]
+      if (!previous) return `M ${point.x} ${point.y}`
+      const handle = (point.x - previous.x) * 0.4
+      return `C ${previous.x + handle} ${previous.y}, ${point.x - handle} ${point.y}, ${point.x} ${point.y}`
+    })
     .join(' ')
   const firstPoint = points.at(0)
   const lastPoint = points.at(-1)

@@ -1,3 +1,4 @@
+import { Cat } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { EmptyState } from '@/components/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +29,7 @@ interface PanelWrapperProps {
   description?: ReactNode
   loading?: boolean
   empty?: boolean
+  compactEmpty?: boolean
   emptyMessage?: string
   height?: string
   className?: string
@@ -87,15 +90,23 @@ export function PanelWrapper(props: PanelWrapperProps) {
     return (
       <div className={frameClassName}>
         <PanelHeader title={props.title} description={props.description} />
-        <div
-          className={cn(
-            'text-muted-foreground flex items-center justify-center px-4 text-sm',
-            height,
-            props.contentClassName
-          )}
-        >
-          {resolvedEmptyMessage}
-        </div>
+        {props.compactEmpty ? (
+          <EmptyState
+            icon={Cat}
+            title={resolvedEmptyMessage}
+            className='journal-panel-empty min-h-0 gap-1 py-3'
+          />
+        ) : (
+          <div
+            className={cn(
+              'text-muted-foreground flex items-center justify-center px-4 text-sm',
+              height,
+              props.contentClassName
+            )}
+          >
+            {resolvedEmptyMessage}
+          </div>
+        )}
       </div>
     )
   }

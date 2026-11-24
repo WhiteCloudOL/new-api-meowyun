@@ -85,7 +85,7 @@ function PulseCard(props: {
   children: React.ReactNode
 }) {
   return (
-    <div className='bg-card overflow-hidden rounded-lg border'>
+    <div className='journal-ranking-card bg-card overflow-hidden rounded-lg border'>
       <header className='border-b px-4 py-3'>
         <h3 className='text-foreground inline-flex items-center gap-2 text-sm font-semibold'>
           {props.icon}
@@ -127,6 +127,7 @@ function MoverRow(props: { row: RankingMover; intent: 'up' | 'down' }) {
         </p>
       </div>
       <span
+        data-growth={props.intent}
         className={cn(
           'inline-flex shrink-0 items-center gap-0.5 font-mono text-xs font-semibold tabular-nums',
           props.intent === 'up'
