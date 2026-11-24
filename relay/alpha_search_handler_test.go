@@ -117,16 +117,20 @@ func TestDeepSeekToolsHelper(t *testing.T) {
 		refunded                   bool
 	}{
 		{name: "search with results", path: search, body: `{"query":"deepseek","count":2,"future_field":{"nested":true}}`,
-			response: results, channelType: constant.ChannelTypeDeepSeek, status: http.StatusOK, settled: []int{375}},
+			response: results, channelType: constant.ChannelTypeDeepSeek, status: http.StatusOK, settled: []int{3000}},
+		{name: "partial search response", path: search, body: `{"query":"deepseek"}`,
+			response: results, channelType: constant.ChannelTypeDeepSeek, status: http.StatusPartialContent, refunded: true},
 		{name: "search without results", path: search, body: `{"query":"site:none.invalid deepseek"}`,
 			response: `{"results":[]}`, channelType: constant.ChannelTypeDeepSeek, status: http.StatusOK, refunded: true},
 		{name: "fetch with page content", path: fetch, body: `{"url":"https://example.com/"}`,
-			response: `{"title":"Example Domain","content":"# Example Domain"}`, channelType: constant.ChannelTypeDeepSeek, status: http.StatusOK, settled: []int{375}},
+			response: `{"title":"Example Domain","content":"# Example Domain"}`, channelType: constant.ChannelTypeDeepSeek, status: http.StatusOK, settled: []int{3000}},
+		{name: "fetch without textual content", path: fetch, body: `{"url":"https://example.com/"}`,
+			response: `{"content":{}}`, channelType: constant.ChannelTypeDeepSeek, status: http.StatusOK, refunded: true},
 		{name: "fetch failure keeps its status", path: fetch, body: `{"url":"https://example.com/missing"}`,
 			response:    `{"error":{"message":"failed to fetch URL","type":"not_found_error","param":null,"code":"invalid_request_error"}}`,
 			channelType: constant.ChannelTypeDeepSeek, status: http.StatusNotFound},
 		{name: "search through a New API channel", path: search, body: `{"query":"deepseek"}`,
-			response: results, channelType: constant.ChannelTypeNewAPI, status: http.StatusOK, settled: []int{375}},
+			response: results, channelType: constant.ChannelTypeNewAPI, status: http.StatusOK, settled: []int{3000}},
 		{name: "channel without the endpoint", path: search, body: `{"query":"deepseek"}`, channelType: constant.ChannelTypeOpenAI},
 	}
 	for _, tc := range tests {
@@ -174,7 +178,7 @@ func TestDeepSeekToolsHelper(t *testing.T) {
 			assert.Equal(t, tc.body, string(gotBody))
 			assert.Equal(t, tc.settled, settlement.settled)
 			assert.Equal(t, tc.refunded, settlement.refunded)
-			if tc.status != http.StatusOK {
+			if tc.status >= 300 {
 				require.NotNil(t, apiErr)
 				assert.Equal(t, tc.status, apiErr.StatusCode)
 				return

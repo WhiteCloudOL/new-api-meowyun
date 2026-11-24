@@ -29,6 +29,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -227,6 +228,56 @@ func registerRelayPlugin(t *testing.T, source string) *jsplugin.LoadedPlugin {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister(plugin.Meta.Key)) })
 	return plugin
+}
+
+func TestDeepSeekSearchPluginRelayAndPricing(t *testing.T) {
+	h := newRelayHarness(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Model{}, &model.Vendor{}))
+	plugin, ok := jsplugin.DefaultRegistry.Get("deepseek-search")
+	require.True(t, ok)
+	channel := h.pluginChannel(plugin.Meta.Key, "sk-search-provider")
+	channel.Models = strings.Join(plugin.Meta.Models, ",")
+	h.install(t, channel)
+
+	settings := config.GlobalConfig.Get("billing_setting").(*billing_setting.BillingSetting)
+	previous := settings.BillingExpr
+	settings.BillingExpr = map[string]string{constant.DeepSeekFetchModel: `tier("request", fixed(0.009))`}
+	model.InvalidatePricingCache()
+	t.Cleanup(func() {
+		settings.BillingExpr = previous
+		model.InvalidatePricingCache()
+	})
+	menu := model.GetPricing()
+	require.Len(t, menu, 2)
+	for _, tc := range []struct {
+		model, path, request, response, price string
+		endpoint                              constant.EndpointType
+		quota                                 int
+	}{
+		{constant.DeepSeekSearchModel, "/v1/tools/search", `{"query":"天气","count":2,"need_content":false}`, `{"results":[{"title":"A"},{"title":"B"}]}`, `tier("request", fixed(0.006))`, constant.EndpointTypeDeepSeekToolsSearch, 3000},
+		{constant.DeepSeekFetchModel, "/v1/tools/fetch", `{"url":"https://example.org"}`, `{"title":"Example","content":"# Example"}`, settings.BillingExpr[constant.DeepSeekFetchModel], constant.EndpointTypeDeepSeekToolsFetch, 4500},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			index := slices.IndexFunc(menu, func(item model.Pricing) bool { return item.ModelName == tc.model })
+			require.NotEqual(t, -1, index)
+			assert.Equal(t, []constant.EndpointType{tc.endpoint}, menu[index].SupportedEndpointTypes)
+			assert.Equal(t, tc.price, menu[index].BillingExpr)
+			h.upstream.respond = func(w http.ResponseWriter, _ int, _ capturedRequest) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tc.response)
+			}
+			h.upstream.reset()
+			outcome := h.post(t, tc.path, tc.request)
+			require.Equal(t, http.StatusOK, outcome.status, outcome.body)
+			assert.JSONEq(t, tc.response, outcome.body)
+			assert.Equal(t, tc.quota, outcome.quota)
+			requests := h.upstream.captured()
+			require.Len(t, requests, 1)
+			assert.Equal(t, tc.path, requests[0].URL)
+			assert.JSONEq(t, tc.request, requests[0].Body)
+			assert.Equal(t, "Bearer sk-search-provider", requests[0].Header.Get("Authorization"))
+		})
+	}
 }
 
 var volatileReplyFields = regexp.MustCompile(`"(id|created|created_at|response_id|item_id)":("[^"]*"|\d+)`)

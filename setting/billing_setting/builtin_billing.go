@@ -32,8 +32,7 @@ var builtinBillingExpr = map[string]string{
 	"deepseek-v4-flash":            deepSeekFlashExpr,
 	"deepseek-v4-flash-vision-exp": deepSeekFlashExpr,
 	"deepseek-v4-pro":              deepSeekPeak + ` ? tier("peak", p * 1.32 + cr * 0.044 + c * 3.96) : tier("off_peak", p * 0.66 + cr * 0.022 + c * 1.98)`,
-	// The Search and Fetch API routing names: $0.75 per 1,000 successful
-	// requests each, the same pricing page. The calls carry no tokens.
-	constant.DeepSeekSearchModel: `tier("request", fixed(0.00075))`,
-	constant.DeepSeekFetchModel:  `tier("request", fixed(0.00075))`,
+	// MeowYun's retail price per successful search or fetch, in gateway units.
+	constant.DeepSeekSearchModel: `tier("request", fixed(0.006))`,
+	constant.DeepSeekFetchModel:  `tier("request", fixed(0.006))`,
 }

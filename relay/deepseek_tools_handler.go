@@ -120,12 +120,13 @@ func DeepSeekToolsHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIErr
 	var billable bool
 	switch info.RelayMode {
 	case relayconstant.RelayModeToolsFetch:
-		billable = ojson.GetBytes(responseBody, "content").String() != ""
+		content := ojson.GetBytes(responseBody, "content")
+		billable = content.Type == ojson.String && content.Str != ""
 	default:
 		results := ojson.GetBytes(responseBody, "results")
 		billable = results.IsArray() && len(results.Array()) > 0
 	}
-	if !billable {
+	if httpResp.StatusCode != http.StatusOK || !billable {
 		if info.Billing != nil {
 			info.Billing.Refund(c)
 		}
