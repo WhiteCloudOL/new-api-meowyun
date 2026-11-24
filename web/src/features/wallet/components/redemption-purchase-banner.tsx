@@ -20,14 +20,10 @@ import { ArrowUpRight, Gift } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import journalMascot from '@/assets/journal/about-mascot.webp'
-import redemptionPoster from '@/assets/wallet/redemption-poster.webp'
 import { Button } from '@/components/ui/button'
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 
 export function RedemptionPurchaseBanner(props: { url: string }) {
   const { t } = useTranslation()
-  const journal =
-    useThemeCustomization().customization.preset === 'meowyun-journal'
 
   return (
     <section
@@ -58,7 +54,7 @@ export function RedemptionPurchaseBanner(props: { url: string }) {
         </Button>
       </div>
       <img
-        src={journal ? journalMascot : redemptionPoster}
+        src={journalMascot}
         alt=''
         width={768}
         height={768}

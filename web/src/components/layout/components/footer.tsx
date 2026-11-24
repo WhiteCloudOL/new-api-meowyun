@@ -21,7 +21,6 @@ import { Fragment, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { HtmlContent } from '@/components/html-content'
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { DEFAULT_LOGO, FORK_REPOSITORY_URL } from '@/lib/constants'
@@ -159,7 +158,6 @@ function ProjectAttribution() {
 
 export function Footer(props: FooterProps) {
   const { t } = useTranslation()
-  const { customization } = useThemeCustomization()
   const {
     systemName,
     logo: systemLogo,
@@ -274,11 +272,9 @@ export function Footer(props: FooterProps) {
               </span>
             </Link>
             <p className='text-muted-foreground/60 mt-3 max-w-[200px] text-xs leading-relaxed'>
-              {customization.preset === 'meowyun-journal'
-                ? t(
-                    'One gateway for your models, with a little help from our catgirl'
-                  )
-                : t('Powerful API Management Platform')}
+              {t(
+                'One gateway for your models, with a little help from our catgirl'
+              )}
             </p>
           </div>
 

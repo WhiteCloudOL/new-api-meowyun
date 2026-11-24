@@ -22,12 +22,10 @@ import { useTranslation } from 'react-i18next'
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useTheme } from '@/context/theme-provider'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { CTA, Features, Hero, HowItWorks, Stats } from './components'
 import { JournalHome } from './components/journal-home'
 import { useHomePageContent } from './hooks'
 
@@ -35,7 +33,6 @@ export function Home() {
   const { i18n, t } = useTranslation()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const { resolvedTheme } = useTheme()
-  const { customization } = useThemeCustomization()
   const { auth } = useAuthStore()
   const isAuthenticated = !!auth.user
   const { content, isLoaded, isUrl } = useHomePageContent()
@@ -125,17 +122,7 @@ export function Home() {
 
   return (
     <PublicLayout showMainContainer={false}>
-      {customization.preset === 'meowyun-journal' ? (
-        <JournalHome isAuthenticated={isAuthenticated} />
-      ) : (
-        <>
-          <Hero isAuthenticated={isAuthenticated} />
-          <Stats />
-          <Features />
-          <HowItWorks />
-          <CTA isAuthenticated={isAuthenticated} />
-        </>
-      )}
+      <JournalHome isAuthenticated={isAuthenticated} />
       <Footer />
     </PublicLayout>
   )

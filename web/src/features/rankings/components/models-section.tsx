@@ -21,7 +21,6 @@ import { BarChart3, Trophy } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { VCHART_OPTION } from '@/lib/vchart'
 
@@ -52,17 +51,13 @@ type ModelsSectionProps = {
  */
 export function ModelsSection(props: ModelsSectionProps) {
   const { t } = useTranslation()
-  const { customization } = useThemeCustomization()
-  const journal = customization.preset === 'meowyun-journal'
   const { resolvedTheme, themeReady } = useChartTheme()
-  const lightText = journal ? '#735766' : 'rgba(15, 23, 42, 0.58)'
-  const lightGrid = journal
-    ? 'rgba(219,112,147,0.12)'
-    : 'rgba(15, 23, 42, 0.12)'
   const chartTextColor =
-    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.68)' : lightText
+    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.68)' : '#735766'
   const chartGridColor =
-    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : lightGrid
+    resolvedTheme === 'dark'
+      ? 'rgba(255, 255, 255, 0.12)'
+      : 'rgba(219,112,147,0.12)'
 
   // Order points so the largest model appears at the bottom of every stack.
   const orderedPoints = useMemo(() => {
@@ -90,7 +85,8 @@ export function ModelsSection(props: ModelsSectionProps) {
       yField: 'tokens',
       seriesField: 'model',
       stack: true,
-      ...(journal && { ...journalStackStyle, color: journalChartPalette }),
+      ...journalStackStyle,
+      color: journalChartPalette,
       legends: { visible: false },
       axes: [
         {
@@ -166,7 +162,7 @@ export function ModelsSection(props: ModelsSectionProps) {
       },
       animationAppear: { duration: 500 },
     }
-  }, [journal, chartGridColor, chartTextColor, orderedPoints, t])
+  }, [chartGridColor, chartTextColor, orderedPoints, t])
 
   return (
     <section className='journal-ranking-card bg-card overflow-hidden rounded-lg border'>

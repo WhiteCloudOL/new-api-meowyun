@@ -20,7 +20,6 @@ import { Crown } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
 import { formatTokens } from '../lib/format'
@@ -48,9 +47,7 @@ type ModelLeaderboardProps = {
  */
 export function ModelLeaderboard(props: ModelLeaderboardProps) {
   const limited = props.limit ? props.rows.slice(0, props.limit) : props.rows
-  const { customization } = useThemeCustomization()
-  const podium =
-    customization.preset === 'meowyun-journal' && props.variant !== 'compact'
+  const podium = props.variant !== 'compact'
   const list = podium ? limited.slice(3) : limited
   const half = Math.ceil(list.length / 2)
   const left = list.slice(0, half)

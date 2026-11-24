@@ -21,7 +21,6 @@ import { PieChart } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { VCHART_OPTION } from '@/lib/vchart'
 
@@ -35,58 +34,6 @@ const PERIOD_DESCRIPTIONS: Record<RankingPeriod, string> = {
   week: 'Token share by model author across the past few weeks',
   month: 'Token share by model author across the past month',
   year: 'Token share by model author across the past year',
-}
-
-/** Stable colour palette for vendors, used in both the share chart and the
- * legend dots. Falls back to a neutral palette for unknown vendors so that
- * future additions still render. */
-const VENDOR_COLOURS: Record<string, string> = {
-  OpenAI: '#10a37f',
-  Anthropic: '#d97757',
-  Google: '#4285f4',
-  DeepSeek: '#7c5cff',
-  Alibaba: '#ff9900',
-  xAI: '#1f2937',
-  Meta: '#1877f2',
-  Moonshot: '#ec4899',
-  Zhipu: '#06b6d4',
-  Mistral: '#ff7000',
-  ByteDance: '#3b82f6',
-  Tencent: '#22c55e',
-  MiniMax: '#a855f7',
-  Cohere: '#fb923c',
-  Baidu: '#ef4444',
-  Others: '#94a3b8',
-}
-
-const FALLBACK_PALETTE = [
-  '#0ea5e9',
-  '#22c55e',
-  '#a855f7',
-  '#f97316',
-  '#14b8a6',
-  '#eab308',
-  '#ec4899',
-  '#84cc16',
-  '#6366f1',
-  '#10b981',
-  '#f43f5e',
-  '#0891b2',
-  '#94a3b8',
-]
-
-function buildVendorColourMap(names: string[]): Record<string, string> {
-  const result: Record<string, string> = {}
-  let fallbackIdx = 0
-  for (const name of names) {
-    if (VENDOR_COLOURS[name]) {
-      result[name] = VENDOR_COLOURS[name]
-    } else {
-      result[name] = FALLBACK_PALETTE[fallbackIdx % FALLBACK_PALETTE.length]
-      fallbackIdx += 1
-    }
-  }
-  return result
 }
 
 const MAX_VENDORS_IN_LIST = 12
@@ -104,28 +51,23 @@ type MarketShareSectionProps = {
  */
 export function MarketShareSection(props: MarketShareSectionProps) {
   const { t } = useTranslation()
-  const { customization } = useThemeCustomization()
-  const journal = customization.preset === 'meowyun-journal'
   const { resolvedTheme, themeReady } = useChartTheme()
-  const lightText = journal ? '#735766' : 'rgba(15, 23, 42, 0.58)'
-  const lightGrid = journal
-    ? 'rgba(219,112,147,0.12)'
-    : 'rgba(15, 23, 42, 0.12)'
   const chartTextColor =
-    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.68)' : lightText
+    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.68)' : '#735766'
   const chartGridColor =
-    resolvedTheme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : lightGrid
+    resolvedTheme === 'dark'
+      ? 'rgba(255, 255, 255, 0.12)'
+      : 'rgba(219,112,147,0.12)'
 
   const colourMap = useMemo(() => {
     const names = props.history.vendors.map((v) => v.name)
-    if (!journal) return buildVendorColourMap(names)
     return Object.fromEntries(
       names.map((name, i) => [
         name,
         journalChartPalette[i % journalChartPalette.length],
       ])
     )
-  }, [props.history, journal])
+  }, [props.history])
 
   const orderedPoints = useMemo(() => {
     const order = new Map(
@@ -147,8 +89,7 @@ export function MarketShareSection(props: MarketShareSectionProps) {
       yField: 'share',
       seriesField: 'vendor',
       stack: true,
-      paddingInner: 0.12,
-      ...(journal && journalStackStyle),
+      ...journalStackStyle,
       legends: { visible: false },
       color: { specified: colourMap },
       axes: [
@@ -215,7 +156,7 @@ export function MarketShareSection(props: MarketShareSectionProps) {
       },
       animationAppear: { duration: 500 },
     }
-  }, [journal, chartGridColor, chartTextColor, colourMap, orderedPoints])
+  }, [chartGridColor, chartTextColor, colourMap, orderedPoints])
 
   const visible = props.rows.slice(0, MAX_VENDORS_IN_LIST)
   const half = Math.ceil(visible.length / 2)
