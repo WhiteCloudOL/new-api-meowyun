@@ -103,11 +103,11 @@ For commercial licensing, please contact support@quantumnous.com
 [data-theme-preset='meowyun-journal'] header a[href='/sign-in']::before {
   content: '✦';
 }
-[data-theme-preset='meowyun-journal'] header a.group img {
+img.meowyun-avatar-badge {
+  box-sizing: border-box;
+  border: 2px solid white;
   border-radius: 50%;
-  box-shadow:
-    0 0 0 2px var(--card),
-    0 0 0 4px var(--ring);
+  box-shadow: 0 2px 8px rgba(232, 90, 141, 0.25);
 }
 [data-theme-preset='meowyun-journal'] .journal-model-card {
   border-top: 3px solid var(--accent);

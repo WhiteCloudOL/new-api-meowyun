@@ -31,6 +31,7 @@ import { SystemUpdateAction } from '@/features/system-update/system-update-actio
 import { useNotifications } from '@/hooks/use-notifications'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { DEFAULT_LOGO } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -104,7 +105,10 @@ export function PublicHeader(props: PublicHeaderProps) {
       src={systemLogo}
       loading={loading}
       logoLoaded={logoLoaded}
-      className='size-full rounded-lg object-contain'
+      className={cn(
+        'size-full rounded-lg object-contain',
+        systemLogo === DEFAULT_LOGO && 'meowyun-avatar-badge'
+      )}
     />
   )
   if (customLogo) logoContent = customLogo
@@ -220,7 +224,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                 to={homeUrl}
                 className='group flex min-w-0 items-center gap-2.5'
               >
-                <div className='flex size-7 shrink-0 items-center justify-center transition-all duration-300 group-hover:scale-105'>
+                <div className='flex size-8 shrink-0 items-center justify-center transition-all duration-300 group-hover:scale-105'>
                   {logoContent}
                 </div>
                 <span

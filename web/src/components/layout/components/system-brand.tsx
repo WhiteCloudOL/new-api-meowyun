@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/sidebar'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { DEFAULT_LOGO } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 type SystemBrandProps = {
@@ -65,11 +66,14 @@ export function SystemBrand(props: SystemBrandProps) {
           'hover:bg-accent focus-visible:ring-ring/40 focus-visible:ring-2'
         )}
       >
-        <div className='flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-md'>
+        <div className='flex size-6 shrink-0 items-center justify-center'>
           <img
             src={logo}
             alt={t('Logo')}
-            className='size-full rounded-md object-cover'
+            className={cn(
+              'size-full rounded-md object-cover',
+              logo === DEFAULT_LOGO && 'meowyun-avatar-badge'
+            )}
           />
         </div>
         <span className='max-w-[12rem] truncate'>{name}</span>
