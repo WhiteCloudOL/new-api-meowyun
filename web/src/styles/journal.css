@@ -113,8 +113,14 @@ body [data-journal-nav] {
   border-radius: 9999px;
 }
 body :is([data-journal-nav='active'], [data-journal-nav][aria-current='page']) {
-  color: var(--primary);
-  background: var(--accent);
+  color: #91374e;
+  background: #ffe7eb;
+}
+.dark
+  body
+  :is([data-journal-nav='active'], [data-journal-nav][aria-current='page']) {
+  color: #ffd2db;
+  background: #59333f;
 }
 body
   :is(

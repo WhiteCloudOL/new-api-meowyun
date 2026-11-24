@@ -67,7 +67,7 @@ For commercial licensing, please contact support@quantumnous.com
   --overview-accent-1: var(--chart-1);
   --overview-accent-2: var(--chart-2);
   --overview-accent-3: var(--chart-3);
-  --radius: .85rem;
+  --radius: 0.85rem;
 }
 .dark [data-theme-preset='meowyun-journal'] {
   --background: #231e25;
@@ -102,17 +102,6 @@ For commercial licensing, please contact support@quantumnous.com
 }
 [data-theme-preset='meowyun-journal'] header a[href='/sign-in']::before {
   content: '✦';
-}
-[data-theme-preset='meowyun-journal'] header a[title][aria-current='page'] {
-  color: var(--primary);
-  background: var(--accent);
-  border-radius: 999px;
-}
-[data-theme-preset='meowyun-journal']
-  header
-  a[title][aria-current='page']::before {
-  content: 'ω';
-  margin-inline-end: 0.32em;
 }
 [data-theme-preset='meowyun-journal'] header a.group img {
   border-radius: 50%;
@@ -529,8 +518,10 @@ For commercial licensing, please contact support@quantumnous.com
  *     cards/borders rather than tinting them with the clay accent).
  *   - `simple-large`: keeps intentionally neutral, high-contrast surfaces. */
 [data-theme-preset]:not([data-theme-preset='default']):not(
-  [data-theme-preset='anthropic']
-):not([data-theme-preset='simple-large']):not([data-theme-preset='meowyun-journal']) {
+    [data-theme-preset='anthropic']
+  ):not([data-theme-preset='simple-large']):not(
+    [data-theme-preset='meowyun-journal']
+  ) {
   --card: color-mix(in oklch, var(--primary) 3%, var(--background));
   --popover: color-mix(in oklch, var(--primary) 5%, var(--background));
   --muted: color-mix(in oklch, var(--primary) 7%, var(--background));
@@ -555,7 +546,9 @@ For commercial licensing, please contact support@quantumnous.com
 .dark
   [data-theme-preset]:not([data-theme-preset='default']):not(
     [data-theme-preset='anthropic']
-  ):not([data-theme-preset='simple-large']):not([data-theme-preset='meowyun-journal']) {
+  ):not([data-theme-preset='simple-large']):not(
+    [data-theme-preset='meowyun-journal']
+  ) {
   --card: color-mix(in oklch, var(--primary) 8%, var(--background));
   --popover: color-mix(in oklch, var(--primary) 12%, var(--background));
   --muted: color-mix(in oklch, var(--primary) 12%, var(--background));
