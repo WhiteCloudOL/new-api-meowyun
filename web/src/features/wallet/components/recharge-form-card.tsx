@@ -214,9 +214,12 @@ export function RechargeFormCard({
   return (
     <TitledCard
       title={t('Add Funds')}
-      description={t('Choose an amount and payment method')}
+      description={
+        hasAnyTopup ? t('Choose an amount and payment method') : undefined
+      }
       icon={<WalletCards className='h-4 w-4' />}
       iconTone='success'
+      headerClassName='wallet-funds-header'
       disableHoverEffect
       action={
         onOpenBilling ? (
@@ -224,7 +227,7 @@ export function RechargeFormCard({
             variant='outline'
             size='sm'
             onClick={onOpenBilling}
-            className='w-full gap-2 sm:w-auto'
+            className='wallet-history gap-2'
           >
             <Receipt className='h-4 w-4' />
             {t('Order History')}
@@ -235,6 +238,49 @@ export function RechargeFormCard({
     >
       {showPurchaseBanner && redemptionPurchaseUrl && (
         <RedemptionPurchaseBanner url={redemptionPurchaseUrl} />
+      )}
+      {/* Redemption Code Section */}
+      {redemptionEnabled ? (
+        <div className='space-y-2.5'>
+          <div className='flex items-center gap-2'>
+            <IconBadge tone='warning' size='xs'>
+              <Gift />
+            </IconBadge>
+            <Label
+              htmlFor='redemption-code'
+              className='text-muted-foreground text-xs font-medium tracking-wider uppercase'
+            >
+              {showPurchaseBanner
+                ? t('Step 2 · Redeem to wallet')
+                : t('Have a Code?')}
+            </Label>
+          </div>
+          <div className='wallet-redeem-row'>
+            <Input
+              id='redemption-code'
+              value={redemptionCode}
+              onChange={(e) => onRedemptionCodeChange(e.target.value)}
+              placeholder={t('Enter your redemption code')}
+              className='h-9 min-w-0'
+            />
+            <Button
+              onClick={onRedeem}
+              disabled={redeeming || !redemptionCode.trim()}
+              className='wallet-berry h-9 px-4'
+            >
+              {redeeming && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
+              {t('Redeem')}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Alert className='border-t'>
+          <AlertDescription>
+            {t(
+              'Redemption codes are disabled until the administrator confirms compliance terms.'
+            )}
+          </AlertDescription>
+        </Alert>
       )}
       {/* Online Topup Section */}
       {hasAnyTopup && (
@@ -533,49 +579,6 @@ export function RechargeFormCard({
             />
           </div>
         )}
-
-      {/* Redemption Code Section */}
-      {redemptionEnabled ? (
-        <div className='space-y-2.5 border-t pt-4 sm:space-y-3 sm:pt-6'>
-          <div className='flex items-center gap-2'>
-            <IconBadge tone='warning' size='xs'>
-              <Gift />
-            </IconBadge>
-            <Label
-              htmlFor='redemption-code'
-              className='text-muted-foreground text-xs font-medium tracking-wider uppercase'
-            >
-              {t('Have a Code?')}
-            </Label>
-          </div>
-          <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
-            <Input
-              id='redemption-code'
-              value={redemptionCode}
-              onChange={(e) => onRedemptionCodeChange(e.target.value)}
-              placeholder={t('Enter your redemption code')}
-              className='h-9 min-w-0'
-            />
-            <Button
-              onClick={onRedeem}
-              disabled={redeeming}
-              variant='outline'
-              className='h-9 px-4'
-            >
-              {redeeming && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
-              {t('Redeem')}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <Alert className='border-t'>
-          <AlertDescription>
-            {t(
-              'Redemption codes are disabled until the administrator confirms compliance terms.'
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
     </TitledCard>
   )
 }

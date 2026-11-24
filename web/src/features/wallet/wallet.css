@@ -1,0 +1,262 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
+.wallet-page,
+.wallet-page-title {
+  display: block;
+  width: 100%;
+  max-width: 1180px;
+  margin-inline: auto;
+}
+.wallet-page {
+  container: wallet / inline-size;
+  --wallet-berry: #9c3657;
+  --wallet-panel: color-mix(in srgb, var(--card) 86%, #ffc8d6);
+  --wallet-line: color-mix(in srgb, var(--card) 68%, #db93a4);
+  --wallet-button: linear-gradient(120deg, #a33759, #b74469);
+  display: grid;
+  gap: 16px;
+}
+.dark .wallet-page {
+  --wallet-berry: #ffb4c7;
+}
+.wallet-columns,
+.wallet-stats {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.wallet-columns {
+  align-items: start;
+}
+.wallet-columns > * {
+  min-width: 0;
+}
+.wallet-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.wallet-page .wallet-stats .wallet-stat {
+  min-width: 0;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  justify-content: center;
+  gap: 6px;
+  padding: clamp(12px, 2cqi, 24px);
+  border-radius: 20px;
+  box-shadow: 0 8px 24px -12px rgba(176, 78, 113, 0.22);
+}
+.wallet-page .wallet-stat:first-child {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #fff0f5, #fce7f3 60%, #f5f3ff);
+  color: #422732;
+}
+.wallet-stat:first-child .text-muted-foreground {
+  color: #795361;
+}
+.dark .wallet-page .wallet-stat:first-child {
+  color: #fff1f4;
+  background: linear-gradient(135deg, #482d37, #422d39 60%, #332e41);
+}
+.dark .wallet-stat:first-child .text-muted-foreground {
+  color: #ecc5d2;
+}
+.wallet-stat-value {
+  z-index: 1;
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: clamp(1.2rem, 2.3cqi, 1.65rem);
+  line-height: 1.18;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+.wallet-stat:first-child .wallet-stat-value {
+  font-size: clamp(2rem, 4cqi, 2.5rem);
+}
+.wallet-watermark {
+  position: absolute;
+  right: 1rem;
+  bottom: -0.85rem;
+  width: 7rem;
+  height: 7rem;
+  rotate: -16deg;
+  color: #c54c72;
+  fill: currentColor;
+  stroke-width: 1;
+  opacity: 0.12;
+  pointer-events: none;
+}
+.wallet-gift-banner {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  min-height: 11.5rem;
+  background: linear-gradient(
+    112deg,
+    var(--wallet-panel),
+    color-mix(in srgb, var(--card) 85%, #f8c975)
+  );
+  border-radius: 18px;
+}
+.wallet-gift-copy {
+  position: relative;
+  z-index: 1;
+  width: 59%;
+  padding: clamp(12px, 2.3cqi, 24px);
+  padding-right: 0;
+  display: grid;
+  justify-items: start;
+  gap: 0.45rem;
+}
+.wallet-gift-art {
+  position: absolute;
+  right: 2%;
+  bottom: 0;
+  width: 39%;
+  height: calc(100% + 10px);
+  pointer-events: none;
+}
+.wallet-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--wallet-berry);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.wallet-page .wallet-berry {
+  background: var(--wallet-button);
+  color: white;
+}
+.wallet-page .wallet-berry:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+.wallet-page .wallet-berry:disabled {
+  color: var(--muted-foreground);
+  background: var(--wallet-panel);
+  opacity: 1;
+}
+.wallet-page .wallet-history {
+  color: var(--wallet-berry);
+  border-color: var(--wallet-line);
+  background: var(--card);
+}
+.wallet-page .wallet-history:hover {
+  background: var(--wallet-panel);
+}
+.wallet-redeem-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.wallet-redeem-row input {
+  flex: 1 1 10rem;
+  max-width: 480px;
+}
+.wallet-reward-pills {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.wallet-reward-pills > div {
+  min-width: 0;
+  padding: 0.65rem 0.5rem;
+  border-radius: 16px;
+  background: var(--wallet-panel);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.wallet-share-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border-radius: 20px;
+  border: 1px solid var(--wallet-line);
+  background: var(--wallet-panel);
+}
+.wallet-share-row input {
+  flex: 1 1 9rem;
+}
+@container wallet (min-width: 880px) {
+  .wallet-columns {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  }
+  .wallet-stats {
+    grid-template-columns: calc((100% - 16px) * 7 / 12) repeat(
+        2,
+        minmax(0, 1fr)
+      );
+  }
+  .wallet-page .wallet-stat:first-child {
+    grid-column: auto;
+  }
+}
+a[data-sidebar='menu-button'][href='/wallet'][data-active]:not(
+    [data-active='false']
+  ) {
+  position: relative;
+  border-radius: 12px;
+}
+a[data-sidebar='menu-button'][href='/wallet'][data-active]:not(
+    [data-active='false']
+  )::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block: 24%;
+  width: 3px;
+  border-radius: 3px;
+  background: #ed87a1;
+}
+
+.wallet-funds-header > div {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.wallet-funds-header > div > :last-child:not(:first-child) {
+  width: auto;
+}
+.wallet-referral {
+  container: referral / inline-size;
+}
+.wallet-share-row,
+.wallet-share-row .wallet-berry {
+  border-radius: 999px;
+}
+@container referral (min-width: 450px) {
+  .wallet-referral-content {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  }
+  .wallet-reward-pills {
+    align-self: start;
+  }
+  .wallet-referral-content > :nth-child(n + 3) {
+    grid-column: 1 / -1;
+  }
+}

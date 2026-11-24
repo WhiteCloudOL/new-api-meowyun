@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { ArrowUpRight, Gift } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import journalMascot from '@/assets/journal/about-mascot.webp'
+import rechargeGift from '@/assets/wallet/recharge-gift.webp'
 import { Button } from '@/components/ui/button'
 
 export function RedemptionPurchaseBanner(props: { url: string }) {
@@ -28,12 +28,12 @@ export function RedemptionPurchaseBanner(props: { url: string }) {
   return (
     <section
       aria-label={t('Top up with a redemption code')}
-      className='bg-primary/5 grid overflow-hidden rounded-xl border sm:grid-cols-[minmax(0,1fr)_16rem]'
+      className='wallet-gift-banner'
     >
-      <div className='flex min-w-0 flex-col items-start justify-center gap-3 p-5 sm:p-6'>
-        <span className='text-primary flex items-center gap-1.5 text-xs font-medium'>
+      <div className='wallet-gift-copy'>
+        <span className='wallet-step'>
           <Gift className='size-3.5' aria-hidden='true' />
-          MeowYunAPI
+          {t('Step 1 · Get a code')}
         </span>
         <h3 className='text-foreground text-lg font-semibold tracking-tight sm:text-xl'>
           {t('Top up with a redemption code')}
@@ -44,7 +44,7 @@ export function RedemptionPurchaseBanner(props: { url: string }) {
         <Button
           role='link'
           size='lg'
-          className='mt-1 h-auto min-h-9 max-w-full whitespace-normal'
+          className='wallet-berry mt-1 h-auto min-h-9 max-w-full whitespace-normal'
           render={
             <a href={props.url} target='_blank' rel='noopener noreferrer' />
           }
@@ -54,13 +54,13 @@ export function RedemptionPurchaseBanner(props: { url: string }) {
         </Button>
       </div>
       <img
-        src={journalMascot}
+        src={rechargeGift}
         alt=''
-        width={768}
-        height={768}
+        width={512}
+        height={500}
         loading='lazy'
         decoding='async'
-        className='mx-auto h-44 w-full max-w-64 self-end object-contain object-bottom sm:h-60'
+        className='wallet-gift-art object-contain object-bottom'
       />
     </section>
   )

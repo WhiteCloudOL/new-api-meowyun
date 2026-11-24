@@ -70,7 +70,7 @@ beforeEach(async () => {
 
 it('shows a safe keyboard-accessible store link when online topup is disabled and keeps code redemption available', async () => {
   const user = userEvent.setup()
-  render(
+  const view = render(
     <I18nextProvider i18n={i18n}>
       <RechargeFormCard {...props} />
     </I18nextProvider>
@@ -86,9 +86,17 @@ it('shows a safe keyboard-accessible store link when online topup is disabled an
   expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   await user.tab()
   expect(link).toHaveFocus()
-  const code = screen.getByRole('textbox', { name: i18n.t('Have a Code?') })
+  const code = screen.getByRole('textbox', {
+    name: i18n.t('Step 2 · Redeem to wallet'),
+  })
+  expect(screen.getByRole('button', { name: '兑换额度' })).toBeDisabled()
   fireEvent.change(code, { target: { value: 'TEST-CODE' } })
   expect(props.onRedemptionCodeChange).toHaveBeenCalledWith('TEST-CODE')
+  view.rerender(
+    <I18nextProvider i18n={i18n}>
+      <RechargeFormCard {...props} redemptionCode='TEST-CODE' />
+    </I18nextProvider>
+  )
   await user.click(screen.getByRole('button', { name: '兑换额度' }))
   expect(props.onRedeem).toHaveBeenCalledOnce()
 })
