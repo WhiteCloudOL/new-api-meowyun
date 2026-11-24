@@ -1,0 +1,173 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
+.journal-about {
+  width: min(calc(100% - 3rem), 68rem);
+  margin: 5.8rem auto 2.5rem;
+}
+.journal-about-cover {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 1.5rem;
+  padding: clamp(1.8rem, 5vw, 4.25rem);
+  border: 1px solid var(--border);
+  border-radius: 2rem;
+  background-color: var(--card);
+  background-image:
+    radial-gradient(ellipse at 85% 50%, var(--accent), transparent 62%),
+    radial-gradient(
+      color-mix(in srgb, var(--primary) 13%, transparent) 1px,
+      transparent 1px
+    );
+  background-size:
+    auto,
+    18px 18px;
+}
+.journal-about-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--primary);
+  font-weight: 650;
+}
+.journal-about-label::before {
+  content: '';
+  width: 1.8rem;
+  height: 3px;
+  border-radius: 5px;
+  background: currentColor;
+}
+.journal-about h1 {
+  margin: 0.6rem 0 1rem;
+  font-size: clamp(2.3rem, 5.5vw, 4.9rem);
+  line-height: 1.03;
+  letter-spacing: -0.055em;
+  color: var(--accent-foreground);
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+.journal-about-cover p {
+  max-width: 36ch;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+  text-wrap: pretty;
+}
+.journal-about-cover img {
+  width: min(100%, 19rem);
+  justify-self: center;
+  transform: rotate(3deg);
+  filter: drop-shadow(0 8px 7px #6d34441c);
+}
+.journal-about-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1.35rem;
+}
+.journal-about-actions a {
+  border-radius: 999px;
+}
+.journal-about-credits,
+.journal-about-notes {
+  margin-top: clamp(1.4rem, 3vw, 2.4rem);
+}
+.journal-about-credits h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 1.45rem;
+  font-weight: 700;
+}
+.journal-about-credits h2 svg {
+  color: var(--primary);
+  width: 1.3rem;
+}
+.journal-about-credits ul {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 1rem;
+  padding: 0.9rem 0;
+  border-block: 1px solid var(--border);
+}
+.journal-about-credits li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.6rem clamp(1rem, 3vw, 2rem);
+  min-width: 0;
+}
+.journal-about-credits li + li {
+  border-inline-start: 1px solid var(--border);
+}
+.journal-about-credits li a:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 1.12rem;
+  font-weight: 650;
+}
+.journal-about-credits li a svg {
+  width: 1rem;
+  color: var(--primary);
+}
+.journal-about-credits li :nth-child(2) {
+  color: var(--muted-foreground);
+  font-size: 0.84rem;
+}
+.journal-about-credits a:hover {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.journal-about-notes {
+  padding: clamp(1.2rem, 3vw, 2.4rem);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  background: var(--card);
+}
+@media (max-width: 640px) {
+  .journal-about {
+    width: calc(100% - 2rem);
+    margin-top: 4.4rem;
+  }
+  .journal-about-cover {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    padding: 1.6rem;
+  }
+  .journal-about-cover img {
+    width: min(65%, 12rem);
+  }
+  .journal-about-credits ul {
+    grid-template-columns: 1fr;
+    padding: 0;
+  }
+  .journal-about-credits li {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 0.3rem;
+  }
+  .journal-about-credits li + li {
+    border-inline-start: 0;
+    border-top: 1px dashed var(--border);
+  }
+}

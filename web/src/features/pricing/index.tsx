@@ -166,9 +166,9 @@ export function Pricing() {
           className='pointer-events-none absolute inset-x-0 top-0 h-[600px] opacity-20 dark:opacity-[0.10]'
           style={{
             background: [
-              'radial-gradient(ellipse 60% 50% at 20% 20%, oklch(0.72 0.18 250 / 80%) 0%, transparent 70%)',
-              'radial-gradient(ellipse 50% 40% at 80% 15%, oklch(0.65 0.15 200 / 60%) 0%, transparent 70%)',
-              'radial-gradient(ellipse 40% 35% at 50% 70%, oklch(0.70 0.12 280 / 40%) 0%, transparent 70%)',
+              'radial-gradient(ellipse 60% 50% at 20% 20%, var(--pricing-glow-1, oklch(0.72 0.18 250 / 80%)) 0%, transparent 70%)',
+              'radial-gradient(ellipse 50% 40% at 80% 15%, var(--pricing-glow-2, oklch(0.65 0.15 200 / 60%)) 0%, transparent 70%)',
+              'radial-gradient(ellipse 40% 35% at 50% 70%, var(--pricing-glow-3, oklch(0.70 0.12 280 / 40%)) 0%, transparent 70%)',
             ].join(', '),
             maskImage:
               'linear-gradient(to bottom, black 40%, transparent 100%)',
@@ -185,11 +185,6 @@ export function Pricing() {
               {t('This site currently has {{count}} models enabled', {
                 count: models?.length || 0,
               })}
-            </p>
-            <p className='text-muted-foreground/60 mx-auto mt-2 max-w-2xl text-xs leading-relaxed sm:text-sm'>
-              {t(
-                'Discover curated AI models, compare pricing and capabilities, and choose the right model for every scenario.'
-              )}
             </p>
             <SearchBar
               value={searchInput}

@@ -19,11 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import { ArrowUpRight, Gift } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import journalVoucher from '@/assets/wallet/journal-voucher.webp'
 import redemptionPoster from '@/assets/wallet/redemption-poster.webp'
 import { Button } from '@/components/ui/button'
+import { useThemeCustomization } from '@/context/theme-customization-provider'
 
 export function RedemptionPurchaseBanner(props: { url: string }) {
   const { t } = useTranslation()
+  const journal =
+    useThemeCustomization().customization.preset === 'meowyun-journal'
 
   return (
     <section
@@ -39,9 +43,7 @@ export function RedemptionPurchaseBanner(props: { url: string }) {
           {t('Top up with a redemption code')}
         </h3>
         <p className='text-muted-foreground max-w-md text-sm leading-relaxed'>
-          {t(
-            'Purchase a code in our store, then redeem it below to add funds to your wallet.'
-          )}
+          {t('Redeem a store code to add funds to your wallet')}
         </p>
         <Button
           role='link'
@@ -56,7 +58,7 @@ export function RedemptionPurchaseBanner(props: { url: string }) {
         </Button>
       </div>
       <img
-        src={redemptionPoster}
+        src={journal ? journalVoucher : redemptionPoster}
         alt=''
         width={768}
         height={768}

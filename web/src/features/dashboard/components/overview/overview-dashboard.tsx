@@ -667,11 +667,6 @@ export function OverviewDashboard() {
                             <h3 className='text-xl font-semibold tracking-tight sm:text-2xl'>
                               {t('Build on your API gateway in minutes')}
                             </h3>
-                            <p className='text-muted-foreground max-w-xl text-sm leading-relaxed'>
-                              {t(
-                                'A focused home for keys, balance, routing, and service health.'
-                              )}
-                            </p>
                           </div>
                           <div className='flex flex-wrap items-center gap-2'>
                             <Button

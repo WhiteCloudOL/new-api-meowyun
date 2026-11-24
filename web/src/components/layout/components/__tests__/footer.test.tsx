@@ -74,6 +74,6 @@ test('a build without a valid revision links to the fork without offering an exa
     screen.queryByRole('link', { name: 'Download deployed source' })
   ).toBeNull()
   expect(
-    screen.getByRole('link', { name: 'Fork repository' }).getAttribute('href')
+    screen.getByRole('link', { name: 'Open Source' }).getAttribute('href')
   ).toBe('https://github.com/WhiteCloudOL/new-api-meowyun')
 })
