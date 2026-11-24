@@ -69,7 +69,7 @@ export default defineConfig(({ envMode }) => {
     },
     html: {
       template: './index.html',
-      favicon: './public/meowyun-avatar-wink.webp',
+      favicon: './public/meowyun-avatar-moe.webp',
     },
     server: {
       host: '0.0.0.0',
