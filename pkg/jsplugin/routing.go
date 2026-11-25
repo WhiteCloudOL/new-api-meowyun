@@ -461,7 +461,24 @@ func (meta Meta) UsesTaskUsageForModel(model string) bool {
 	if schema, _ := meta.UsageForModel(model); len(schema) > 0 {
 		return true
 	}
-	return meta.HasTaskPart() && meta.UsesTaskDriver()
+	if !meta.HasTaskPart() {
+		return false
+	}
+	if len(meta.Protocols) == 0 && len(meta.Routes) == 0 {
+		return true
+	}
+	for _, route := range meta.Routes {
+		if (route.Type == RouteTypeSubmit || route.Type == RouteTypeDynamic) &&
+			(len(route.Models) == 0 || slices.Contains(route.Models, model)) {
+			return true
+		}
+	}
+	for _, claim := range meta.Protocols {
+		if definition, _ := HostProtocol(claim.Name); definition.UsesTaskDriver && (len(claim.Models) == 0 || slices.Contains(claim.Models, model)) {
+			return true
+		}
+	}
+	return false
 }
 
 // RoutingGeneration is an immutable, request-pinnable view of all effective

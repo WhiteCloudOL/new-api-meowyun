@@ -26,8 +26,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newAlibabaTTSTestGateway(t *testing.T, upstream string) (*gin.Engine, *model.User, *model.Token) {
+func newAlibabaTTSTestGateway(t *testing.T, upstream string, pluginKeys ...string) (*gin.Engine, *model.User, *model.Token) {
 	t.Helper()
+	pluginKey := "alibaba-tts"
+	if len(pluginKeys) > 0 {
+		pluginKey = pluginKeys[0]
+	}
 	user, token := setupResponsesWSRequestTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}, &model.Option{}))
 	require.NoError(t, i18n.Init())
@@ -41,16 +45,16 @@ func newAlibabaTTSTestGateway(t *testing.T, upstream string) (*gin.Engine, *mode
 		model.InitChannelCache()
 	})
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode":    `{"cosyvoice-v3.5-plus":"tiered_expr","qwen3-tts-flash-realtime":"tiered_expr","qwen-audio-3.1-tts-flash":"tiered_expr","qwen-audio-3.1-tts-next":"tiered_expr","voice-enrollment":"tiered_expr"}`,
-		"billing_setting.billing_expr":    `{"cosyvoice-v3.5-plus":"tier(\"characters\", p * 2)","qwen3-tts-flash-realtime":"tier(\"characters\", p * 2)","qwen-audio-3.1-tts-flash":"tier(\"tokens\", u(\"input_tokens\") * 0.000002 + u(\"output_tokens\") * 0.000004)","qwen-audio-3.1-tts-next":"tier(\"tokens\", u(\"input_tokens\") * 0.000002 + u(\"output_tokens\") * 0.000004)","voice-enrollment":"tier(\"operation\", u(\"requests\") * 0.000002)"}`,
+		"billing_setting.billing_mode":    `{"cosyvoice-v3.5-plus":"tiered_expr","qwen3-tts-flash":"tiered_expr","qwen3-tts-flash-realtime":"tiered_expr","qwen-audio-3.1-tts-flash":"tiered_expr","qwen-audio-3.1-tts-next":"tiered_expr","voice-enrollment":"tiered_expr"}`,
+		"billing_setting.billing_expr":    `{"cosyvoice-v3.5-plus":"tier(\"characters\", p * 2)","qwen3-tts-flash":"tier(\"characters\", p * 2)","qwen3-tts-flash-realtime":"tier(\"characters\", p * 2)","qwen-audio-3.1-tts-flash":"tier(\"tokens\", u(\"input_tokens\") * 0.000002 + u(\"output_tokens\") * 0.000004)","qwen-audio-3.1-tts-next":"tier(\"tokens\", u(\"input_tokens\") * 0.000002 + u(\"output_tokens\") * 0.000004)","voice-enrollment":"tier(\"operation\", u(\"requests\") * 0.000002)"}`,
 		"group_ratio_setting.group_ratio": `{"default":1}`,
 	}))
 	operation_setting.GetQuotaSetting().PreConsumeMultiplier = 0.5
 	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
 	require.NoError(t, model.DB.Model(user).Updates(map[string]any{"quota": 1_000_000, "setting": `{"billing_preference":"wallet_only"}`}).Error)
 	require.NoError(t, model.DB.Model(token).Update("remain_quota", 1_000_000).Error)
-	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, Name: "alibaba-native-test", Key: "provider-key", BaseURL: &upstream, Status: common.ChannelStatusEnabled, Group: "default", Models: "cosyvoice-v3.5-plus,qwen3-tts-flash-realtime,qwen-audio-3.1-tts-flash,qwen-audio-3.1-tts-next,voice-enrollment", Setting: common.GetPointer(`{"task_plugin_key":"alibaba-tts"}`)}
-	channel.Models += ",next-alias"
+	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, Name: "alibaba-native-test", Key: "provider-key", BaseURL: &upstream, Status: common.ChannelStatusEnabled, Group: "default", Models: "cosyvoice-v3.5-plus,qwen3-tts-flash-realtime,qwen-audio-3.1-tts-flash,qwen-audio-3.1-tts-next,voice-enrollment", Setting: common.GetPointer(fmt.Sprintf(`{"task_plugin_key":%q}`, pluginKey))}
+	channel.Models += ",qwen3-tts-flash,next-alias"
 	channel.ModelMapping = common.GetPointer(`{"next-alias":"qwen-audio-3.1-tts-next"}`)
 	require.NoError(t, channel.Insert())
 	model.InitChannelCache()
@@ -59,20 +63,33 @@ func newAlibabaTTSTestGateway(t *testing.T, upstream string) (*gin.Engine, *mode
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 	})
 	generation := jsplugin.DefaultRegistry.Generation()
-	plugin, found := generation.Get("alibaba-tts")
+	plugin, found := generation.Get(pluginKey)
 	require.True(t, found)
 	for _, route := range plugin.Meta.Routes {
+		if route.Type != jsplugin.RouteTypeRelay {
+			continue
+		}
+		candidates := generation.LookupDeclaredRoutes(http.MethodPost, route.Path)
 		engine.POST(route.Path, func(c *gin.Context) {
-			c.Set(jsplugin.ContextKeyPinnedRoute, jsplugin.PinnedRoute{Generation: generation, Plugin: plugin, Route: route})
+			c.Set(jsplugin.ContextKeyPinnedRoute, jsplugin.PinnedRoute{
+				Generation: generation, Plugin: candidates[0].Plugin, Route: candidates[0].Route, Candidates: candidates,
+			})
 		}, middleware.PrepareTaskPluginRoute(), middleware.Distribute(), func(c *gin.Context) { Relay(c, types.RelayFormatOpenAIAudio) })
 	}
 	engine.POST("/v1/audio/speech", middleware.PinTaskPluginEndpoint(), middleware.PrepareTaskPluginEndpoint(), middleware.Distribute(), func(c *gin.Context) { Relay(c, types.RelayFormatOpenAIAudio) })
 	engine.GET("/api-ws/v1/inference", PluginSpeechWebSocket)
 	engine.GET("/api-ws/v1/realtime", PluginSpeechWebSocket)
+	engine.GET("/alibaba/api-ws/v1/inference", PluginSpeechWebSocket)
 	return engine, user, token
 }
 
 func TestAlibabaTTSNativeHTTPBilling(t *testing.T) {
+	for _, pluginKey := range []string{"alibaba", "alibaba-tts"} {
+		t.Run(pluginKey, func(t *testing.T) { testAlibabaTTSNativeHTTPBilling(t, pluginKey) })
+	}
+}
+
+func testAlibabaTTSNativeHTTPBilling(t *testing.T, pluginKey string) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer provider-key", r.Header.Get("Authorization"))
 		var body struct {
@@ -85,6 +102,9 @@ func TestAlibabaTTSNativeHTTPBilling(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch body.Model {
+		case "qwen3-tts-flash":
+			assert.Equal(t, "/api/v1/services/aigc/multimodal-generation/generation", r.URL.Path)
+			_, _ = io.WriteString(w, `{"output":{"audio":{"data":"YQ=="}},"usage":{"characters":4}}`)
 		case "cosyvoice-v3.5-plus":
 			if r.Header.Get("X-DashScope-SSE") == "enable" {
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -119,7 +139,7 @@ func TestAlibabaTTSNativeHTTPBilling(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	engine, user, token := newAlibabaTTSTestGateway(t, upstream.URL)
+	engine, user, token := newAlibabaTTSTestGateway(t, upstream.URL, pluginKey)
 	voiceID := "cosyvoice-v3.5-plus-" + jsplugin.UserResourceScope(user.Id) + "-voice"
 	for _, tc := range []struct {
 		name, model, input, path string
@@ -127,6 +147,7 @@ func TestAlibabaTTSNativeHTTPBilling(t *testing.T) {
 		quota                    int
 	}{
 		{"native characters", "cosyvoice-v3.5-plus", `{"text":"你好","voice":"longxiaochun","volume":0}`, "/api/v1/services/audio/tts/SpeechSynthesizer", false, 3},
+		{"native speech on the shared image path", "qwen3-tts-flash", `{"text":"hello","voice":"Cherry"}`, "/api/v1/services/aigc/multimodal-generation/generation", false, 4},
 		{"native cumulative SSE", "cosyvoice-v3.5-plus", `{"text":"hello","voice":"longxiaochun"}`, "/api/v1/services/audio/tts/SpeechSynthesizer", true, 7},
 		{"flash token facts", "qwen-audio-3.1-tts-flash", `{"text":"hello","voice":"Cherry"}`, "/api/v1/services/audio/tts/SpeechSynthesizer", false, 80},
 		{"flash SSE token facts", "qwen-audio-3.1-tts-flash", `{"text":"hello","voice":"Cherry"}`, "/api/v1/services/audio/tts/SpeechSynthesizer", true, 80},
@@ -267,14 +288,14 @@ func TestAlibabaTTSNativeWebSocketTasks(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	engine, user, token := newAlibabaTTSTestGateway(t, upstream.URL)
+	engine, user, token := newAlibabaTTSTestGateway(t, upstream.URL, "alibaba")
 	// Observe handler completion so quota assertions do not race settlement.
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer close(finished)
 		engine.ServeHTTP(w, r)
 	}))
 	defer gateway.Close()
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(gateway.URL, "http")+"/api-ws/v1/inference", http.Header{"Authorization": {"Bearer sk-" + token.Key}})
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(gateway.URL, "http")+"/alibaba/api-ws/v1/inference", http.Header{"Authorization": {"Bearer sk-" + token.Key}})
 	require.NoError(t, err)
 	defer conn.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))

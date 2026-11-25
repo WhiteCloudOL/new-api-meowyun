@@ -156,18 +156,101 @@ export function getQuotaTypeConfig(
 // Endpoint Templates
 // ============================================================================
 
-export const ENDPOINT_TEMPLATES: Record<
-  string,
-  { path: string; method: string }
-> = {
+type EndpointConfig = { path: string; method: string }
+
+const openAIImageEndpoints = {
+  'image-generation': { path: '/v1/images/generations', method: 'POST' },
+  'image-edits': { path: '/v1/images/edits', method: 'POST' },
+}
+
+const aliyunTtsEndpoints = {
+  'aliyun-tts': {
+    path: '/api/v1/services/audio/tts/SpeechSynthesizer',
+    method: 'POST',
+  },
+  'aliyun-qwen-tts': {
+    path: '/api/v1/services/aigc/multimodal-generation/generation',
+    method: 'POST',
+  },
+  'aliyun-voice-customization': {
+    path: '/api/v1/services/audio/tts/customization',
+    method: 'POST',
+  },
+}
+
+const aliyunImageEndpoints = {
+  ...openAIImageEndpoints,
+  'aliyun-image': {
+    path: '/api/v1/services/aigc/multimodal-generation/generation',
+    method: 'POST',
+  },
+  'aliyun-image-async': {
+    path: '/api/v1/services/aigc/image-generation/generation',
+    method: 'POST',
+  },
+  'aliyun-text-to-image': {
+    path: '/api/v1/services/aigc/text2image/image-synthesis',
+    method: 'POST',
+  },
+  'aliyun-image-to-image': {
+    path: '/api/v1/services/aigc/image2image/image-synthesis',
+    method: 'POST',
+  },
+  'aliyun-task': { path: '/api/v1/tasks/{task_id}', method: 'GET' },
+}
+
+export const ENDPOINT_TEMPLATES: Record<string, EndpointConfig> = {
   openai: { path: '/v1/chat/completions', method: 'POST' },
   'openai-response': { path: '/v1/responses', method: 'POST' },
   anthropic: { path: '/v1/messages', method: 'POST' },
   gemini: { path: '/v1beta/models/{model}:generateContent', method: 'POST' },
   'jina-rerank': { path: '/rerank', method: 'POST' },
-  'image-generation': { path: '/v1/images/generations', method: 'POST' },
   embeddings: { path: '/v1/embeddings', method: 'POST' },
   'openai-tts': { path: '/v1/audio/speech', method: 'POST' },
+  'deepseek-tools-search': { path: '/v1/tools/search', method: 'POST' },
+  'deepseek-tools-fetch': { path: '/v1/tools/fetch', method: 'POST' },
+  ...aliyunTtsEndpoints,
+  ...aliyunImageEndpoints,
+  'aliyun-video': {
+    path: '/api/v1/services/aigc/video-generation/video-synthesis',
+    method: 'POST',
+  },
+  'aliyun-image-to-video': {
+    path: '/api/v1/services/aigc/image2video/video-synthesis',
+    method: 'POST',
+  },
+}
+
+export const MODEL_ENDPOINT_PRESETS: Record<
+  string,
+  Record<string, EndpointConfig>
+> = {
+  ...Object.fromEntries(
+    Object.entries(ENDPOINT_TEMPLATES).map(([key, endpoint]) => [
+      key,
+      { [key]: endpoint },
+    ])
+  ),
+  'deepseek-websearch': {
+    'deepseek-tools-search': ENDPOINT_TEMPLATES['deepseek-tools-search'],
+  },
+  'deepseek-fetch': {
+    'deepseek-tools-fetch': ENDPOINT_TEMPLATES['deepseek-tools-fetch'],
+  },
+  'image-generation': openAIImageEndpoints,
+  'aliyun-tts': {
+    'openai-tts': ENDPOINT_TEMPLATES['openai-tts'],
+    ...aliyunTtsEndpoints,
+  },
+  'aliyun-image': aliyunImageEndpoints,
+  aliyun: {
+    openai: ENDPOINT_TEMPLATES.openai,
+    'openai-tts': ENDPOINT_TEMPLATES['openai-tts'],
+    ...aliyunTtsEndpoints,
+    ...aliyunImageEndpoints,
+    'aliyun-video': ENDPOINT_TEMPLATES['aliyun-video'],
+    'aliyun-image-to-video': ENDPOINT_TEMPLATES['aliyun-image-to-video'],
+  },
 }
 
 // ============================================================================

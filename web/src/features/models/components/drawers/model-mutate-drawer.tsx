@@ -71,7 +71,7 @@ import {
 } from '@/lib/server-error-message'
 
 import { createModel, updateModel, getModel, getVendors } from '../../api'
-import { getNameRuleOptions, ENDPOINT_TEMPLATES } from '../../constants'
+import { getNameRuleOptions, MODEL_ENDPOINT_PRESETS } from '../../constants'
 import { modelsQueryKeys, vendorsQueryKeys } from '../../lib'
 import {
   modelFormSchema,
@@ -224,9 +224,9 @@ export function ModelMutateDrawer(props: {
   })
   const isSubmitting = save.isPending
   const handleFillEndpointTemplate = (key: string) => {
-    const template = ENDPOINT_TEMPLATES[key]
+    const template = MODEL_ENDPOINT_PRESETS[key]
     if (template) {
-      form.setValue('endpoints', JSON.stringify({ [key]: template }, null, 2), {
+      form.setValue('endpoints', JSON.stringify(template, null, 2), {
         shouldDirty: true,
       })
     }
@@ -486,7 +486,7 @@ export function ModelMutateDrawer(props: {
                           {t('Endpoints')}
                         </h3>
                         <Combobox
-                          options={Object.keys(ENDPOINT_TEMPLATES).map(
+                          options={Object.keys(MODEL_ENDPOINT_PRESETS).map(
                             (key) => ({ value: key, label: key })
                           )}
                           onValueChange={(value: string | null) => {

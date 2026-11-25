@@ -16,6 +16,8 @@ func TestHostProtocolRegistryDrivesProtocolRoutesOnce(t *testing.T) {
 	expected := []string{
 		"GET /api-ws/v1/inference",
 		"GET /api-ws/v1/realtime",
+		"GET /alibaba/api-ws/v1/inference",
+		"GET /alibaba/api-ws/v1/realtime",
 		"GET /alibaba-tts/api-ws/v1/inference",
 		"GET /alibaba-tts/api-ws/v1/realtime",
 		"POST /v1/audio/speech",

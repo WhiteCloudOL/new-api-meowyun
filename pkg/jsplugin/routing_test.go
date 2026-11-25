@@ -303,6 +303,15 @@ func TestProtocolClaimDecodeAndValidation(t *testing.T) {
 			errContains: "is not declared in plugin meta models",
 		},
 		{
+			name:   "rejects an overlapping model on the same path",
+			models: `["gpt-5.5", "gpt-5.6"]`,
+			metaFields: `routes: [
+				{method: "POST", path: "/v1/batch", type: "submit", models: ["gpt-5.5"], decode: "decodeJob", render: "jobCreated"},
+				{method: "POST", path: "/v1/batch", type: "submit", models: ["gpt-5.5", "gpt-5.6"], decode: "decodeJob", render: "jobCreated"}
+			],`,
+			errContains: "duplicate route",
+		},
+		{
 			name:        "duplicate models in claim",
 			models:      `["gpt-5.5"]`,
 			metaFields:  `protocols: [{name: "openai_responses", models: ["gpt-5.5", "gpt-5.5"], supports: ["stream", "sync", "background"]}],`,

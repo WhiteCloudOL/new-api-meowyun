@@ -39,8 +39,8 @@ const WAN_MODELS = {
 // async image2image/image-synthesis with input.images and output.results;
 // legacy_imageedit (wanx2.1-imageedit) uses the same async
 // image2image/image-synthesis with input.function, input.base_image_url and an
-// optional input.mask_image_url; qwen (Qwen-Image, Qwen-Image-Edit, Z-Image)
-// uses multimodal-generation synchronously only, with output.choices.
+// optional input.mask_image_url; Qwen and Z-Image use multimodal-generation.
+// Qwen Image 2.1 and 3.0 also have a native asynchronous endpoint.
 const IMAGE_MODELS = {
   "wan2.7-image-pro": "image27",
   "wan2.7-image": "image27",
@@ -59,6 +59,8 @@ const IMAGE_MODELS = {
   "qwen-image-max": "qwen",
   "qwen-image-2.0": "qwen",
   "qwen-image-2.0-pro": "qwen",
+  "qwen-image-2.1-pro": "qwen",
+  "qwen-image-2.1-turbo": "qwen",
   "qwen-image-3.0": "qwen",
   "qwen-image-3.0-pro": "qwen",
   "qwen-image-edit": "qwen",
@@ -91,6 +93,8 @@ const QWEN_IMAGE_LIMITS = {
   "qwen-image-max": { maxN: 1, maxInput: 0 },
   "qwen-image-2.0": { maxN: 6, maxInput: 3 },
   "qwen-image-2.0-pro": { maxN: 6, maxInput: 3 },
+  "qwen-image-2.1-pro": { maxN: 6, maxInput: 10 },
+  "qwen-image-2.1-turbo": { maxN: 6, maxInput: 10 },
   "qwen-image-3.0": { maxN: 6, maxInput: 3 },
   "qwen-image-3.0-pro": { maxN: 6, maxInput: 3 },
   "qwen-image-edit": { maxN: 1, maxInput: 3, minInput: 1 },
@@ -111,6 +115,15 @@ const IMAGE_MODEL_SNAPSHOTS = [
   "qwen-image-edit-max-2026-01-16",
 ];
 const QWEN_IMAGE3_MODELS = ["qwen-image-3.0", "qwen-image-3.0-pro"];
+const ASYNC_MULTIMODAL_IMAGE_MODELS = [
+  "wan2.7-image-pro",
+  "wan2.7-image",
+  "wan2.6-image",
+  "wan2.6-t2i",
+  "qwen-image-2.1-pro",
+  "qwen-image-2.1-turbo",
+  ...QWEN_IMAGE3_MODELS,
+];
 const Z_IMAGE_MODELS = ["z-image-turbo"];
 // Qwen-Image-3.0 usage: output_image_type / input_image_type switch to the
 // 2K tier above this pixel area.
@@ -216,13 +229,13 @@ function wanVideoUsageProfiles() {
 export const meta = {
   apiVersion: 1,
   key: "alibaba",
-  name: "Alibaba Bailian",
+  name: { en: "Alibaba Bailian / Qwen AI", zh: "阿里云百炼 / 千问 AI" },
   icon: "Bailian.Color",
   description: {
-    en: "Alibaba Cloud Bailian image and video generation (Wan, Qwen-Image, Z-Image)",
-    zh: "阿里云百炼图片与视频生成（万相、千问图像、Z-Image）",
+    en: "Image and video generation, speech synthesis and voice customization",
+    zh: "图片与视频生成、语音合成及音色定制",
   },
-  version: "1.5.0",
+  version: "1.6.0",
   author: { name: "QuantumNous" },
   channelTypes: [17],
   // Literal metadata also supports the dashboard's static script preview.
@@ -267,6 +280,8 @@ export const meta = {
     "qwen-image-max",
     "qwen-image-2.0",
     "qwen-image-2.0-pro",
+    "qwen-image-2.1-pro",
+    "qwen-image-2.1-turbo",
     "qwen-image-3.0",
     "qwen-image-3.0-pro",
     "qwen-image-edit",
@@ -316,7 +331,7 @@ export const meta = {
       method: "POST",
       path: "/ali/api/v1/services/aigc/image-generation/generation",
       type: "submit",
-      models: ["wan2.7-image-pro", "wan2.7-image", "wan2.6-image", "wan2.6-t2i"],
+      models: ASYNC_MULTIMODAL_IMAGE_MODELS,
       decode: "createImageTask",
       render: "taskCreated",
     },
@@ -324,7 +339,7 @@ export const meta = {
       method: "POST",
       path: "/api/v1/services/aigc/image-generation/generation",
       type: "submit",
-      models: ["wan2.7-image-pro", "wan2.7-image", "wan2.6-image", "wan2.6-t2i"],
+      models: ASYNC_MULTIMODAL_IMAGE_MODELS,
       decode: "createImageTask",
       render: "taskCreated",
     },
@@ -430,7 +445,8 @@ function videoService(kind) {
 // form every gateway release serves; DashScope itself serves the unprefixed
 // paths.
 function apiRoot(ctx) {
-  return ctx.baseUrl + (viaNewAPI(ctx) ? "/ali" : "");
+  const base = trimmed(ctx.baseUrl).replace(/\/+$/, "");
+  return viaNewAPI(ctx) ? base + "/ali" : base.replace(/\/api\/v1$/, "");
 }
 
 function firstImage(req) {
@@ -520,7 +536,8 @@ function convertImage(ctx) {
   if (mode !== "sync" && mode !== "async") throw new Error("upstream_mode must be sync or async");
   const legacyProfile = profile === "legacy" || profile === "legacy_edit" || profile === "legacy_imageedit";
   if (legacyProfile && mode === "sync") throw new Error("this image model only supports asynchronous HTTP calls");
-  if (profile === "qwen" && mode === "async") throw new Error("this image model only supports synchronous HTTP calls");
+  if (profile === "qwen" && mode === "async" && !ASYNC_MULTIMODAL_IMAGE_MODELS.includes(modelKey(model)))
+    throw new Error("this image model only supports synchronous HTTP calls");
   const parameters = {};
   for (const key of [
     "n",
@@ -544,6 +561,12 @@ function convertImage(ctx) {
     for (const key of IMAGE_EDIT_FUNCTION_PARAMETERS) if (req[key] !== undefined) parameters[key] = req[key];
   }
   Object.assign(parameters, objectValue(metadata.parameters, "metadata.parameters"));
+  if (profile === "qwen" && parameters.response_format !== undefined) {
+    if (parameters.response_format !== "url" && parameters.response_format !== "b64_json")
+      throw new Error("parameters.response_format must be url or b64_json");
+    if (parameters.response_format === "b64_json" && (mode !== "sync" || !qwenImage3(ctx)))
+      throw new Error("native b64_json requires a synchronous Qwen Image 3.0 model");
+  }
   for (const key of ["prompt_extend", "enable_thinking", "watermark", "enable_interleave", "enable_sequential", "thinking_mode", "stream"]) {
     if (parameters[key] !== undefined && typeof parameters[key] !== "boolean") throw new Error(key + " must be a boolean");
   }
@@ -761,7 +784,7 @@ function imageUsage(ctx, body) {
   let count;
   if (reported !== undefined) {
     // Do not let fractional, negative or oversized upstream counts change billing.
-    if (!Number.isInteger(reported) || reported < 0 || reported > MAX_IMAGE_OUTPUTS || (images.length && reported === 0))
+    if (!Number.isInteger(reported) || reported < 0 || reported > MAX_IMAGE_OUTPUTS || (images.length && reported !== images.length))
       throw new Error("invalid upstream image count");
     count = reported;
   } else if (content.length) count = images.length;

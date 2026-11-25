@@ -1772,6 +1772,7 @@ func TestServeTaskPluginImageProtocolAppliesChannelOverrides(t *testing.T) {
 		{name: "alibaba/Qwen parameters and usage", pluginKey: "alibaba", overrides: []string{`{"response_format":"b64_json","n":2,"size":"1024x1024"}`}, wantB64: true, wantCount: 2, wantParameters: map[string]any{"n": 2, "size": "1024*1024"}},
 		{name: "alibaba/nested provider parameters and usage", pluginKey: "alibaba", overrides: []string{`{"response_format":"b64_json","operations":[{"mode":"set","path":"parameters.n","value":2},{"mode":"set","path":"parameters.size","value":"1024x1024"},{"mode":"set","path":"parameters.watermark","value":false}]}`}, wantB64: true, wantCount: 2, wantParameters: map[string]any{"n": 2, "size": "1024*1024", "watermark": false}},
 		{name: "alibaba/multipart Qwen edit", pluginKey: "alibaba", model: "qwen-image-edit-plus", multipart: true, overrides: []string{`{"response_format":"b64_json","n":2,"seed":7,"watermark":false}`}, wantB64: true, wantCount: 2, wantParameters: map[string]any{"n": 2, "seed": 7, "watermark": false}},
+		{name: "alibaba/multipart Qwen Image 2.1 edit", pluginKey: "alibaba", model: "qwen-image-2.1-turbo", multipart: true, overrides: []string{`{}`}, wantCount: 1},
 		{name: "alibaba/legacy Wan async result", pluginKey: "alibaba", model: "wan2.2-t2i-flash", async: true, overrides: []string{`{"response_format":"b64_json","n":2,"size":"1024x1024"}`}, wantB64: true, wantCount: 2, wantParameters: map[string]any{"n": 2, "size": "1024*1024"}},
 		{name: "alibaba/modern Wan async result", pluginKey: "alibaba", model: "wan2.6-t2i", async: true, overrides: []string{`{"response_format":"b64_json","n":2}`}, wantB64: true, wantCount: 2, wantParameters: map[string]any{"n": 2}},
 		{name: "alibaba/provider rejects oversized count", pluginKey: "alibaba", overrides: []string{`{"n":129}`}, wantStatus: 400, wantCode: "plugin_request_invalid"},
@@ -1901,6 +1902,9 @@ func TestServeTaskPluginImageProtocolAppliesChannelOverrides(t *testing.T) {
 				task.SetData(map[string]any{"data": []any{map[string]any{"url": "https://cdn.example/image.png"}}})
 				if pluginKey == "alibaba" {
 					result := `{"request_id":"request_image","output":{"choices":[{"message":{"content":[{"image":"https://cdn.example/image.png"}]}}]},"usage":{"output_image_count":1}}`
+					if strings.HasPrefix(tc.model, "qwen-image-2.1") {
+						result = strings.Replace(result, `"output_image_count"`, `"image_count"`, 1)
+					}
 					if tc.async {
 						result = `{"output":{"task_id":"upstream_image","task_status":"PENDING"}}`
 					}
@@ -1982,7 +1986,7 @@ func TestServeTaskPluginImageProtocolAppliesChannelOverrides(t *testing.T) {
 				usage, ok := response.Metadata["usage"].(map[string]any)
 				require.True(t, ok)
 				countKey := "output_image_count"
-				if tc.async {
+				if tc.async || strings.HasPrefix(tc.model, "qwen-image-2.1") {
 					countKey = "image_count"
 				}
 				assert.EqualValues(t, 1, usage[countKey])

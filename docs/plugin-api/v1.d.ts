@@ -68,6 +68,7 @@ export type SubmitIntent = {kind: "submit"; model: string; action?: string; requ
 export type RelayIntent = {kind: "relay"; model: string; requestBody?: unknown; /** Required on native relay routes; normalized host AudioRequest. */ request?: {model: string; input: string; voice?: string; response_format?: string}; targetModel?: string};
 export type QueryIntent = {kind: "query"; taskIds: readonly string[]};
 export type TaskIntent = SubmitIntent | QueryIntent | RelayIntent;
+/** Submit and relay bindings may share a method and path only with disjoint model lists. */
 export interface NativeRoute {method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; /** The vendor's own path; the host also serves it under /{key} unless its first segment is the key or a proper prefix of it. */ path: string; type: "submit" | "query" | "dynamic" | "relay"; /** relay routes require POST, decode, render and this protocol; prohibit taskIdParam and retainResult. */ protocol?: "openai_audio_speech"; action?: string; /** Query routes: the path parameter carrying the gateway task id or, when the path has none, the query-string parameter of that name. Default "task_id". */ taskIdParam?: string; decode?: string; render: string; models?: readonly string[]; retainResult?: boolean}
 export type ProtocolName = "openai_responses" | "openai_video" | "openai_audio_speech" | "openai_image";
 export type ResponsesMode = "stream" | "sync" | "background";

@@ -94,8 +94,12 @@ func newPluginGenerationBuilder(staticRoutes []gin.RouteInfo, trustedProxies []s
 	for _, staticRoute := range staticRoutes {
 		// These built-in transports belong to the plugin's own namespace;
 		// they must not exclude its HTTP routes from the same generation.
-		if staticRoute.Method == http.MethodGet && (staticRoute.Path == "/alibaba-tts/api-ws/v1/inference" || staticRoute.Path == "/alibaba-tts/api-ws/v1/realtime") {
-			continue
+		if staticRoute.Method == http.MethodGet {
+			switch staticRoute.Path {
+			case "/alibaba/api-ws/v1/inference", "/alibaba/api-ws/v1/realtime",
+				"/alibaba-tts/api-ws/v1/inference", "/alibaba-tts/api-ws/v1/realtime":
+				continue
+			}
 		}
 		first, _, _ := strings.Cut(strings.TrimPrefix(staticRoute.Path, "/"), "/")
 		if first != "" && !strings.HasPrefix(first, ":") && !strings.HasPrefix(first, "*") {

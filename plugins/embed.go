@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"strings"
 
 	"github.com/MoeForge/moego/base64"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -43,8 +44,47 @@ func Source(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if key == "alibaba" {
+		speech, err := taskPlugins.ReadFile("tasks/alibaba-tts/plugin.js")
+		if err != nil {
+			return "", err
+		}
+		// Keep the existing speech-only factory key for saved channels and
+		// pricing overrides. Both entries execute the same speech driver.
+		return string(source) + "\nconst bailianSpeech = (() => {\n" +
+			strings.ReplaceAll(string(speech), "export const ", "const ") + alibabaSpeechBindings, nil
+	}
 	return string(source), nil
 }
+
+const alibabaSpeechBindings = `
+  return {meta, protocols, native};
+})();
+const speechMeta = bailianSpeech.meta;
+const speechProfiles = speechMeta.usageProfiles;
+const ordinarySpeechModels = speechMeta.models.filter(
+  model => !speechProfiles.some(profile => profile.models.includes(model))
+);
+// Responses and native video previously had no explicit model scope.
+// Keep that scope tied to the original image and video models.
+for (const protocol of meta.protocols) {
+  if (protocol.models === undefined) protocol.models = meta.models.slice();
+}
+for (const route of meta.routes) {
+  if (route.type === "submit" && route.models === undefined) {
+    route.models = meta.models.filter(model => !imageModel({model}));
+  }
+}
+meta.models = meta.models.concat(speechMeta.models);
+meta.protocols = meta.protocols.concat(speechMeta.protocols);
+meta.routes = meta.routes.concat(speechMeta.routes);
+meta.usageProfiles = meta.usageProfiles.concat(speechProfiles, [{models: ordinarySpeechModels, schema: {}}]);
+meta.channelConfig = speechMeta.channelConfig;
+meta.allowedHosts = speechMeta.allowedHosts;
+meta.baseUrl = speechMeta.baseUrl;
+Object.assign(native, bailianSpeech.native);
+Object.assign(protocols, bailianSpeech.protocols);
+`
 
 // Icon returns the embedded sidecar logo for a factory plugin, if the plugin
 // directory ships an icon.svg or icon.png next to plugin.js.

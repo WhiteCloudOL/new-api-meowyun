@@ -33,17 +33,23 @@ func TestAlibabaResponsesProtocol(t *testing.T) {
 	plugin, err := registry.RegisterFactory(source, jsplugin.Options{Key: "alibaba"})
 	require.NoError(t, err)
 
-	t.Run("claims every Ali model", func(t *testing.T) {
+	legacySpeech, ok := jsplugin.DefaultRegistry.Generation().Get("alibaba-tts")
+	require.True(t, ok)
+
+	t.Run("routes images and videos to Responses and speech to audio", func(t *testing.T) {
 		for _, model := range plugin.Meta.Models {
 			binding, found := registry.Generation().LookupEndpoint("POST", "/v1/responses", model)
+			if slices.Contains(legacySpeech.Meta.Models, model) {
+				assert.False(t, found, model)
+				continue
+			}
 			require.True(t, found, model)
 			assert.Same(t, plugin, binding.Plugin)
 			assert.Equal(t, "openai_responses", binding.Protocol)
 		}
 	})
 
-	t.Run("selects image and video usage profiles for every declared model", func(t *testing.T) {
-		require.Len(t, plugin.Meta.UsageProfiles, 9)
+	t.Run("scopes usage profiles without changing legacy speech billing", func(t *testing.T) {
 		covered := make(map[string]bool)
 		for _, profile := range plugin.Meta.UsageProfiles {
 			for _, name := range profile.Models {
@@ -54,6 +60,17 @@ func TestAlibabaResponsesProtocol(t *testing.T) {
 		for _, name := range plugin.Meta.Models {
 			require.True(t, covered[name], name)
 			schema, examples := plugin.Meta.UsageForModel(name)
+			if slices.Contains(legacySpeech.Meta.Models, name) {
+				legacySchema, legacyExamples := legacySpeech.Meta.UsageForModel(name)
+				if len(legacySchema) == 0 {
+					assert.Empty(t, schema, name)
+				} else {
+					assert.Equal(t, legacySchema, schema, name)
+				}
+				assert.Equal(t, legacyExamples, examples, name)
+				assert.Equal(t, legacySpeech.Meta.UsesTaskUsageForModel(name), plugin.Meta.UsesTaskUsageForModel(name), name)
+				continue
+			}
 			assert.Empty(t, examples)
 			isImage := strings.Contains(name, "-image") || strings.Contains(name, "-t2i") || strings.Contains(name, "-i2i")
 			switch {
@@ -731,6 +748,8 @@ func TestAlibabaImageSubmission(t *testing.T) {
 		{"2.6 interleaved default count", "wan2.6-image", map[string]any{"messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"text": "recipe"}}}}}, map[string]any{"enable_interleave": true}, "image-generation/generation", 5},
 		{"2.6 edit", "wan2.6-image", map[string]any{"messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"image": "https://cdn.example/input.png"}, map[string]any{"text": "watercolor"}}}}}, map[string]any{"size": "2K", "n": 1}, "multimodal-generation/generation", 1},
 		{"2.7 4K", "wan2.7-image-pro", map[string]any{"messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"text": "a cat"}}}}}, map[string]any{"size": "4K"}, "multimodal-generation/generation", 1},
+		{"Qwen 2.1 native async", "qwen-image-2.1-turbo", map[string]any{"messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"text": "a cat"}}}}}, map[string]any{"n": 2, "size": "1024*1024"}, "image-generation/generation", 2},
+		{"Qwen 2.1 native sync", "qwen-image-2.1-pro", map[string]any{"messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"text": "a cat"}}}}}, map[string]any{"n": 1, "watermark": false}, "multimodal-generation/generation", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := "/ali" + base + tc.path
@@ -803,6 +822,8 @@ func TestAlibabaImageValidation(t *testing.T) {
 		{"string mode flag", "wan2.7-image", map[string]any{"enable_sequential": "true"}, "must be a boolean"},
 		{"upstream SSE", "wan2.6-image", map[string]any{"metadata": map[string]any{"parameters": map[string]any{"stream": true}}}, "upstream streaming requires"},
 		{"legacy synchronous", "wan2.2-t2i-flash", map[string]any{"metadata": map[string]any{"upstream_mode": "sync"}}, "only supports asynchronous"},
+		{"Qwen 3 native async cannot emit Base64", "qwen-image-3.0", map[string]any{"metadata": map[string]any{"upstream_mode": "async", "parameters": map[string]any{"response_format": "b64_json"}}}, "requires a synchronous Qwen Image 3.0 model"},
+		{"Qwen 2.1 count above provider maximum", "qwen-image-2.1-pro", map[string]any{"metadata": map[string]any{"parameters": map[string]any{"n": 7}}}, "n must be"},
 		{"edit without reference", "wan2.6-image", nil, "requires a reference image"},
 		{"t2i with reference", "wan2.6-t2i", map[string]any{"image": "https://cdn.example/input.png"}, "only supports text-to-image input"},
 		{"invalid 4K", "wan2.7-image", map[string]any{"size": "4K"}, "4K is only supported"},
@@ -1297,6 +1318,8 @@ func TestAlibabaOpenAIImageDecodeAndSubmission(t *testing.T) {
 			"image-generation/generation", "enable", "text_to_image", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
 		{"qwen edit with an image URL", "qwen-image-edit-plus", "edit", map[string]any{"prompt": "watercolor", "image": "https://cdn.example/input.png"},
 			"multimodal-generation/generation", "", "image_to_image", 1, map[string]any{"image_count": float64(1)}, map[string]any{"image_count": float64(1)}},
+		{"Qwen 2.1 edit can use more than three references", "qwen-image-2.1-pro", "edit", map[string]any{"prompt": "watercolor", "image": []any{"https://cdn.example/1.png", "https://cdn.example/2.png", "https://cdn.example/3.png", "https://cdn.example/4.png"}},
+			"multimodal-generation/generation", "", "image_to_image", 1, map[string]any{"image_count": float64(1)}, map[string]any{"image_count": float64(1)}},
 		{"qwen-image-3.0 edit counts input images", "qwen-image-3.0-pro", "edit", map[string]any{"prompt": "watercolor", "image": []any{"https://cdn.example/1.png", "https://cdn.example/2.png"}, "size": "2048x2048"},
 			"multimodal-generation/generation", "", "image_to_image", 1,
 			map[string]any{"image_count": float64(1), "output_image_type": "qima_output_2k", "input_image_count": float64(2)}, map[string]any{"image_count": float64(1)}},
@@ -1517,6 +1540,8 @@ func TestAlibabaOpenAIImageCountDerivationAndRender(t *testing.T) {
 		{"z-image keeps its count", "z-image-turbo", map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": []any{map[string]any{"image": first}}}}}}, map[string]any{"image_count": 1, "width": 1024, "height": 1536},
 			map[string]any{"image_count": float64(1)}, 1, false},
 		{"inconsistent zero count retains the reservation", "qwen-image-3.0-pro", map[string]any{"choices": twoImagesOneChoice}, map[string]any{"output_image_count": 0},
+			nil, 2, true},
+		{"inconsistent positive count retains the reservation", "qwen-image-2.1-pro", map[string]any{"choices": twoImagesOneChoice}, map[string]any{"image_count": 1},
 			nil, 2, true},
 		{"fractional count retains the reservation", "wan2.6-t2i", map[string]any{"choices": twoImagesOneChoice}, map[string]any{"image_count": 1.5},
 			nil, 2, true},

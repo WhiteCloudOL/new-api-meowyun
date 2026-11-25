@@ -1750,7 +1750,7 @@ func normalizeV1Meta(meta *Meta) error {
 		hosts[normalized] = struct{}{}
 		meta.AllowedHosts[index] = normalized
 	}
-	routeKeys := make(map[string]struct{}, len(meta.Routes))
+	routesByShape := make(map[string][]Route, len(meta.Routes))
 	for index := range meta.Routes {
 		if err := validateRoute(&meta.Routes[index]); err != nil {
 			return err
@@ -1764,11 +1764,20 @@ func normalizeV1Meta(meta *Meta) error {
 		if err != nil {
 			return err
 		}
-		key := meta.Routes[index].Method + " " + shape
-		if _, exists := routeKeys[key]; exists {
-			return fmt.Errorf("plugin meta routes contain duplicate route %s %s", meta.Routes[index].Method, meta.Routes[index].Path)
+		route := meta.Routes[index]
+		key := route.Method + " " + shape
+		for _, previous := range routesByShape[key] {
+			// Model-scoped JSON submissions (including synchronous relay
+			// routes) can share a vendor path when their models are disjoint.
+			if route.Path != previous.Path ||
+				(route.Type != RouteTypeSubmit && route.Type != RouteTypeRelay) ||
+				(previous.Type != RouteTypeSubmit && previous.Type != RouteTypeRelay) ||
+				len(route.Models) == 0 || len(previous.Models) == 0 ||
+				slices.ContainsFunc(route.Models, func(model string) bool { return slices.Contains(previous.Models, model) }) {
+				return fmt.Errorf("plugin meta routes contain duplicate route %s %s", route.Method, route.Path)
+			}
 		}
-		routeKeys[key] = struct{}{}
+		routesByShape[key] = append(routesByShape[key], route)
 	}
 	protocols := make(map[string]struct{}, len(meta.Protocols))
 	for index := range meta.Protocols {

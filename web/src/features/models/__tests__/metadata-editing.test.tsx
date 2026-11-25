@@ -293,6 +293,37 @@ describe('model pricing entry', () => {
 })
 
 describe('metadata editing', () => {
+  it('loads both OpenAI image routes and the native provider presets', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: { items: [] } },
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <ModelMutateDrawer open onOpenChange={() => {}} />
+      </QueryClientProvider>
+    )
+    const user = userEvent.setup()
+    const templates = screen.getByRole('combobox', { name: 'Load template...' })
+    for (const [template, paths] of [
+      ['image-generation', ['/v1/images/generations', '/v1/images/edits']],
+      ['deepseek-websearch', ['/v1/tools/search']],
+      ['aliyun-tts', ['/api/v1/services/audio/tts/SpeechSynthesizer']],
+      ['aliyun-image', ['/api/v1/services/aigc/image-generation/generation']],
+      ['aliyun', ['/api/v1/services/aigc/video-generation/video-synthesis']],
+    ] as const) {
+      await user.click(templates)
+      await user.click(await screen.findByRole('option', { name: template }))
+      const values = screen
+        .getAllByPlaceholderText('{"path": "/v1/...", "method": "POST"}')
+        .map((input) => JSON.parse((input as HTMLInputElement).value).path)
+      expect(values).toEqual(expect.arrayContaining([...paths]))
+      if (template === 'image-generation') expect(values).toHaveLength(2)
+    }
+    client.clear()
+  })
   it.each([
     {
       name: 'business rejection',
