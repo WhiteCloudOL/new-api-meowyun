@@ -235,7 +235,7 @@ export const meta = {
     en: "Image and video generation, speech synthesis and voice customization",
     zh: "图片与视频生成、语音合成及音色定制",
   },
-  version: "1.6.0",
+  version: "1.6.1",
   author: { name: "QuantumNous" },
   channelTypes: [17],
   // Literal metadata also supports the dashboard's static script preview.

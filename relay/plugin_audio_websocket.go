@@ -66,12 +66,6 @@ func PluginSpeechWebSocketHelper(c *gin.Context, client *websocket.Conn, runner 
 	if strings.HasSuffix(c.Request.URL.Path, "/inference") {
 		queryModel = ""
 	}
-	pluginKeys := []string{"alibaba", "alibaba-tts"}
-	if strings.HasPrefix(c.Request.URL.Path, "/alibaba-tts/") {
-		pluginKeys = []string{"alibaba-tts"}
-	} else if strings.HasPrefix(c.Request.URL.Path, "/alibaba/") {
-		pluginKeys = []string{"alibaba"}
-	}
 	for {
 		var first []byte
 		if queryModel != "" {
@@ -101,41 +95,28 @@ func PluginSpeechWebSocketHelper(c *gin.Context, client *websocket.Conn, runner 
 			}
 		}
 		generation := pluginruntime.DefaultRegistry.Generation()
-		bodies := make(map[*pluginruntime.LoadedPlugin]map[string]any, len(pluginKeys))
-		var candidates []pluginruntime.ProtocolBinding
-		var decodeErr error
-		for _, key := range pluginKeys {
-			plugin, exists := generation.Get(key)
-			if !exists {
-				continue
-			}
-			served, declared, allowed := model.ResolveTaskPluginModel(generation, requestedModel, plugin.Meta.Models)
-			if !allowed {
-				continue
-			}
-			value, err := plugin.Engine.CallPath(ctx, "native", []string{"socketStart"}, map[string]any{"event": event, "queryModel": queryModel, "model": served, "upstreamModel": declared})
-			if err != nil {
-				decodeErr = err
-				continue
-			}
-			decodedBody, ok := value.(map[string]any)
-			if !ok || decodedBody["model"] != served {
-				continue
-			}
-			bodies[plugin] = decodedBody
-			candidates = append(candidates, pluginruntime.ProtocolBinding{Plugin: plugin, Protocol: "openai_audio_speech", Model: served})
+		plugin, exists := generation.Get("alibaba")
+		if !exists {
+			writeSpeechSocketError(client, queryModel != "", "", types.NewError(fmt.Errorf("unsupported speech model"), types.ErrorCodeInvalidRequest))
+			return
 		}
-		if len(candidates) == 0 {
-			if decodeErr != nil {
-				writeSpeechSocketError(client, queryModel != "", "", types.NewError(decodeErr, types.ErrorCodeInvalidRequest))
-				return
-			}
+		served, declared, allowed := model.ResolveTaskPluginModel(generation, requestedModel, plugin.Meta.Models)
+		if !allowed {
+			writeSpeechSocketError(client, queryModel != "", "", types.NewError(fmt.Errorf("unsupported speech model"), types.ErrorCodeInvalidRequest))
+			return
+		}
+		value, err := plugin.Engine.CallPath(ctx, "native", []string{"socketStart"}, map[string]any{"event": event, "queryModel": queryModel, "model": served, "upstreamModel": declared})
+		if err != nil {
+			writeSpeechSocketError(client, queryModel != "", "", types.NewError(err, types.ErrorCodeInvalidRequest))
+			return
+		}
+		decodedBody, ok := value.(map[string]any)
+		if !ok || decodedBody["model"] != served {
 			writeSpeechSocketError(client, queryModel != "", "", types.NewError(fmt.Errorf("unsupported speech model"), types.ErrorCodeInvalidRequest))
 			return
 		}
 		pinned := pluginruntime.PinnedEndpoint{
-			Generation: generation, Plugin: candidates[0].Plugin, Protocol: "openai_audio_speech",
-			Model: candidates[0].Model, Candidates: candidates,
+			Generation: generation, Plugin: plugin, Protocol: "openai_audio_speech", Model: served,
 		}
 		request := &dto.AudioRequest{Model: pinned.Model}
 		encoded, err := common.Marshal(request)
@@ -147,10 +128,10 @@ func PluginSpeechWebSocketHelper(c *gin.Context, client *websocket.Conn, runner 
 		httpRequest.ContentLength = int64(len(encoded))
 		requestID := common.GetTimeString() + common.GetRandomString(8)
 		apiErr := runner(httpRequest, requestID, func(task *gin.Context) *types.NewAPIError {
-			return runPluginSpeechTask(task, client, messages, pinned, bodies, request, queryModel != "")
+			return runPluginSpeechTask(task, client, messages, pinned, decodedBody, request, queryModel != "")
 		})
 		if apiErr != nil {
-			writeSpeechSocketError(client, queryModel != "", bodies[pinned.Plugin]["taskId"], apiErr)
+			writeSpeechSocketError(client, queryModel != "", decodedBody["taskId"], apiErr)
 			return
 		}
 		if queryModel != "" {
@@ -169,7 +150,7 @@ func writeSpeechSocketError(client *websocket.Conn, realtime bool, taskID any, a
 	_ = client.WriteMessage(websocket.TextMessage, payload)
 }
 
-func runPluginSpeechTask(c *gin.Context, client *websocket.Conn, incoming <-chan speechSocketMessage, pinned pluginruntime.PinnedEndpoint, bodies map[*pluginruntime.LoadedPlugin]map[string]any, request *dto.AudioRequest, realtime bool) *types.NewAPIError {
+func runPluginSpeechTask(c *gin.Context, client *websocket.Conn, incoming <-chan speechSocketMessage, pinned pluginruntime.PinnedEndpoint, decodedBody map[string]any, request *dto.AudioRequest, realtime bool) *types.NewAPIError {
 	if apiErr := checkResponsesWSModelAccess(c, request.Model); apiErr != nil {
 		return apiErr
 	}
@@ -186,8 +167,7 @@ func runPluginSpeechTask(c *gin.Context, client *websocket.Conn, incoming <-chan
 	if apiErr := middleware.SetupContextForSelectedChannel(c, channel, request.Model); apiErr != nil {
 		return apiErr
 	}
-	selected, _ := c.Get(pluginruntime.ContextKeyPinnedEndpoint)
-	plugin := selected.(pluginruntime.PinnedEndpoint).Plugin
+	plugin := pinned.Plugin
 	info := relaycommon.GenRelayInfoOpenAIAudio(c, request)
 	info.RelayMode = relayconstant.RelayModeAudioSpeech
 	info.IsStream = true
@@ -195,7 +175,7 @@ func runPluginSpeechTask(c *gin.Context, client *websocket.Conn, incoming <-chan
 	if err := helper.ModelMappedHelper(c, info, request); err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError)
 	}
-	body := maps.Clone(bodies[plugin])
+	body := maps.Clone(decodedBody)
 	body["providerModel"] = info.UpstreamModelName
 	c.Set("task_request", body)
 	frozenBody, _ := common.Marshal(body["event"])

@@ -33,13 +33,24 @@ func TestAlibabaResponsesProtocol(t *testing.T) {
 	plugin, err := registry.RegisterFactory(source, jsplugin.Options{Key: "alibaba"})
 	require.NoError(t, err)
 
-	legacySpeech, ok := jsplugin.DefaultRegistry.Generation().Get("alibaba-tts")
-	require.True(t, ok)
+	_, hasSeparateTTS := jsplugin.DefaultRegistry.Generation().Get("alibaba-tts")
+	require.False(t, hasSeparateTTS)
+	speechModels := []string{"voice-enrollment"}
+	for _, protocol := range plugin.Meta.Protocols {
+		if protocol.Name == "openai_audio_speech" {
+			speechModels = append(speechModels, protocol.Models...)
+		}
+	}
+	for _, name := range plugin.Meta.Models {
+		if strings.HasSuffix(name, "-realtime") || strings.Contains(name, "-realtime-") {
+			speechModels = append(speechModels, name)
+		}
+	}
 
 	t.Run("routes images and videos to Responses and speech to audio", func(t *testing.T) {
 		for _, model := range plugin.Meta.Models {
 			binding, found := registry.Generation().LookupEndpoint("POST", "/v1/responses", model)
-			if slices.Contains(legacySpeech.Meta.Models, model) {
+			if slices.Contains(speechModels, model) {
 				assert.False(t, found, model)
 				continue
 			}
@@ -60,15 +71,15 @@ func TestAlibabaResponsesProtocol(t *testing.T) {
 		for _, name := range plugin.Meta.Models {
 			require.True(t, covered[name], name)
 			schema, examples := plugin.Meta.UsageForModel(name)
-			if slices.Contains(legacySpeech.Meta.Models, name) {
-				legacySchema, legacyExamples := legacySpeech.Meta.UsageForModel(name)
-				if len(legacySchema) == 0 {
+			if slices.Contains(speechModels, name) {
+				switch name {
+				case "qwen-audio-3.1-tts-flash", "qwen-audio-3.1-tts-next":
+					assert.ElementsMatch(t, []string{"input_tokens", "output_tokens"}, slices.Collect(maps.Keys(schema)))
+				case "voice-enrollment":
+					assert.ElementsMatch(t, []string{"requests", "action"}, slices.Collect(maps.Keys(schema)))
+				default:
 					assert.Empty(t, schema, name)
-				} else {
-					assert.Equal(t, legacySchema, schema, name)
 				}
-				assert.Equal(t, legacyExamples, examples, name)
-				assert.Equal(t, legacySpeech.Meta.UsesTaskUsageForModel(name), plugin.Meta.UsesTaskUsageForModel(name), name)
 				continue
 			}
 			assert.Empty(t, examples)

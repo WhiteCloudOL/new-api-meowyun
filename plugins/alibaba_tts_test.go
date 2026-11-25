@@ -9,11 +9,11 @@ import (
 )
 
 func TestAlibabaTTSPluginContracts(t *testing.T) {
-	source, err := Source("alibaba-tts")
+	source, err := Source("alibaba")
 	require.NoError(t, err)
-	plugin, err := jsplugin.CompilePlugin(source, jsplugin.Options{Key: "alibaba-tts"})
+	plugin, err := jsplugin.CompilePlugin(source, jsplugin.Options{Key: "alibaba"})
 	require.NoError(t, err)
-	assert.Equal(t, "阿里云 TTS 兼容", plugin.Meta.Name)
+	assert.Equal(t, "Alibaba Bailian / Qwen AI", plugin.Meta.Name)
 	assert.Contains(t, plugin.Meta.Models, "cosyvoice-v3.5-plus")
 	assert.Contains(t, plugin.Meta.Models, "qwen3-tts-instruct-flash")
 	assert.Contains(t, plugin.Meta.AllowedHosts, "dashscope.aliyuncs.com")
@@ -88,11 +88,10 @@ func TestAlibabaTTSPluginContracts(t *testing.T) {
 }
 
 func TestAlibabaTTSNativeContracts(t *testing.T) {
-	source, err := Source("alibaba-tts")
+	source, err := Source("alibaba")
 	require.NoError(t, err)
 	plugin, err := jsplugin.CompilePlugin(source, jsplugin.Options{})
 	require.NoError(t, err)
-	assert.False(t, plugin.Meta.UsesTaskDriver())
 	for _, tc := range []struct {
 		name, model, decoder string
 		input                map[string]any
@@ -152,9 +151,9 @@ func TestAlibabaTTSNativeContracts(t *testing.T) {
 }
 
 func TestAlibabaTTSPluginRejectsUnsupportedRequestShapes(t *testing.T) {
-	source, err := Source("alibaba-tts")
+	source, err := Source("alibaba")
 	require.NoError(t, err)
-	plugin, err := jsplugin.CompilePlugin(source, jsplugin.Options{Key: "alibaba-tts"})
+	plugin, err := jsplugin.CompilePlugin(source, jsplugin.Options{Key: "alibaba"})
 	require.NoError(t, err)
 
 	_, err = plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_audio_speech", "decodeRequest"}, map[string]any{

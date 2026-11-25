@@ -45,14 +45,15 @@ func Source(key string) (string, error) {
 		return "", err
 	}
 	if key == "alibaba" {
-		speech, err := taskPlugins.ReadFile("tasks/alibaba-tts/plugin.js")
+		speech, err := taskPlugins.ReadFile("tasks/alibaba/speech.js")
 		if err != nil {
 			return "", err
 		}
-		// Keep the existing speech-only factory key for saved channels and
-		// pricing overrides. Both entries execute the same speech driver.
-		return string(source) + "\nconst bailianSpeech = (() => {\n" +
-			strings.ReplaceAll(string(speech), "export const ", "const ") + alibabaSpeechBindings, nil
+		driver, ok := strings.CutSuffix(strings.TrimSpace(string(speech)), "export { meta, protocols, native };")
+		if !ok {
+			return "", fmt.Errorf("invalid embedded Alibaba speech driver exports")
+		}
+		return string(source) + "\nconst bailianSpeech = (() => {\n" + driver + alibabaSpeechBindings, nil
 	}
 	return string(source), nil
 }
@@ -77,7 +78,9 @@ for (const route of meta.routes) {
 }
 meta.models = meta.models.concat(speechMeta.models);
 meta.protocols = meta.protocols.concat(speechMeta.protocols);
-meta.routes = meta.routes.concat(speechMeta.routes);
+meta.routes = meta.routes.concat(speechMeta.routes, speechMeta.routes.map(route => ({
+  ...route, path: "/alibaba-tts" + route.path,
+})));
 meta.usageProfiles = meta.usageProfiles.concat(speechProfiles, [{models: ordinarySpeechModels, schema: {}}]);
 meta.channelConfig = speechMeta.channelConfig;
 meta.allowedHosts = speechMeta.allowedHosts;

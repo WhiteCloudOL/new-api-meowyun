@@ -2793,7 +2793,7 @@ func TestNormalizePluginAudioUsage(t *testing.T) {
 }
 
 func TestAlibabaAudioAdaptorWritesBase64Response(t *testing.T) {
-	source, err := plugins.Source("alibaba-tts")
+	source, err := plugins.Source("alibaba")
 	require.NoError(t, err)
 	plugin, err := pluginruntime.CompilePlugin(source, pluginruntime.Options{})
 	require.NoError(t, err)

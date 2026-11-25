@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var expectedKeys = []string{"alibaba", "alibaba-tts", "breeze-tts", "deepseek-search", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
+var expectedKeys = []string{"alibaba", "breeze-tts", "deepseek-search", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
 var expectedTaskKeys = []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
 
 // The built-in request processing plugins and the stage hooks each exports.
@@ -63,6 +63,7 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 		{"POST", "/alibaba/api/v1/services/aigc/video-generation/video-synthesis", "alibaba", jsplugin.RouteTypeSubmit, "", "taskCreated", true, false},
 		{"POST", "/ali/api/v1/services/aigc/video-generation/video-synthesis", "alibaba", jsplugin.RouteTypeSubmit, "", "taskCreated", false, true},
 		{"GET", "/api/v1/tasks/:task_id", "alibaba", jsplugin.RouteTypeQuery, "", "taskStatus", false, false},
+		{"POST", "/alibaba-tts/api/v1/services/audio/tts/SpeechSynthesizer", "alibaba", jsplugin.RouteTypeRelay, "", "response", false, false},
 		{"GET", "/ali/api/v1/tasks/:task_id", "alibaba", jsplugin.RouteTypeQuery, "", "taskStatus", false, true},
 		{"POST", "/v1/videos/generations", "xai", jsplugin.RouteTypeSubmit, "", "videoCreated", false, false},
 		{"POST", "/v1/videos/edits", "xai", jsplugin.RouteTypeSubmit, "", "videoCreated", false, false},

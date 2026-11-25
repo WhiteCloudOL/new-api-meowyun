@@ -26,12 +26,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newAlibabaTTSTestGateway(t *testing.T, upstream string, pluginKeys ...string) (*gin.Engine, *model.User, *model.Token) {
+func newAlibabaTTSTestGateway(t *testing.T, upstream string) (*gin.Engine, *model.User, *model.Token) {
 	t.Helper()
-	pluginKey := "alibaba-tts"
-	if len(pluginKeys) > 0 {
-		pluginKey = pluginKeys[0]
-	}
+	const pluginKey = "alibaba"
 	user, token := setupResponsesWSRequestTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}, &model.Option{}))
 	require.NoError(t, i18n.Init())
@@ -80,16 +77,12 @@ func newAlibabaTTSTestGateway(t *testing.T, upstream string, pluginKeys ...strin
 	engine.GET("/api-ws/v1/inference", PluginSpeechWebSocket)
 	engine.GET("/api-ws/v1/realtime", PluginSpeechWebSocket)
 	engine.GET("/alibaba/api-ws/v1/inference", PluginSpeechWebSocket)
+	engine.GET("/alibaba-tts/api-ws/v1/inference", PluginSpeechWebSocket)
 	return engine, user, token
 }
 
 func TestAlibabaTTSNativeHTTPBilling(t *testing.T) {
-	for _, pluginKey := range []string{"alibaba", "alibaba-tts"} {
-		t.Run(pluginKey, func(t *testing.T) { testAlibabaTTSNativeHTTPBilling(t, pluginKey) })
-	}
-}
 
-func testAlibabaTTSNativeHTTPBilling(t *testing.T, pluginKey string) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer provider-key", r.Header.Get("Authorization"))
 		var body struct {
@@ -139,7 +132,7 @@ func testAlibabaTTSNativeHTTPBilling(t *testing.T, pluginKey string) {
 		}
 	}))
 	defer upstream.Close()
-	engine, user, token := newAlibabaTTSTestGateway(t, upstream.URL, pluginKey)
+	engine, user, token := newAlibabaTTSTestGateway(t, upstream.URL)
 	voiceID := "cosyvoice-v3.5-plus-" + jsplugin.UserResourceScope(user.Id) + "-voice"
 	for _, tc := range []struct {
 		name, model, input, path string
@@ -288,14 +281,14 @@ func TestAlibabaTTSNativeWebSocketTasks(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	engine, user, token := newAlibabaTTSTestGateway(t, upstream.URL, "alibaba")
+	engine, user, token := newAlibabaTTSTestGateway(t, upstream.URL)
 	// Observe handler completion so quota assertions do not race settlement.
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer close(finished)
 		engine.ServeHTTP(w, r)
 	}))
 	defer gateway.Close()
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(gateway.URL, "http")+"/alibaba/api-ws/v1/inference", http.Header{"Authorization": {"Bearer sk-" + token.Key}})
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(gateway.URL, "http")+"/alibaba-tts/api-ws/v1/inference", http.Header{"Authorization": {"Bearer sk-" + token.Key}})
 	require.NoError(t, err)
 	defer conn.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))

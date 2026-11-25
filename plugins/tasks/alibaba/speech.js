@@ -77,20 +77,9 @@ const REQUEST_OVERRIDE_KEYS = new Set([
   "quality",
 ]);
 
-export const meta = {
-  apiVersion: 1,
-  key: "alibaba-tts",
-  name: "阿里云 TTS 兼容",
-  icon: "Bailian.Color",
-  description: {
-    en: "Alibaba Cloud speech synthesis, realtime audio and voice customization",
-    zh: "阿里云语音合成、实时音频与音色定制",
-  },
-  version: "1.2.0",
-  author: { name: "MeowYun" },
+const meta = {
   baseUrl: "https://dashscope.aliyuncs.com",
   models: [...COSY_MODELS, ...QWEN_MODELS, ...REALTIME_MODELS, NEXT_MODEL, ...VOICE_MODELS],
-  fetchMode: "per_task",
   allowedHosts: ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"],
   protocols: [{ name: "openai_audio_speech", models: [...COSY_MODELS, ...QWEN_MODELS, NEXT_MODEL] }],
   routes: [
@@ -359,7 +348,7 @@ function parseSpeech(ctx) {
   };
 }
 
-export const protocols = {
+const protocols = {
   openai_audio_speech: {
     decodeRequest: decodeSpeech,
     buildRequest: buildSpeech,
@@ -484,7 +473,7 @@ function buildNative(ctx, request, settings) {
     method: "POST", headers, body, responseType: request.sse ? "sse" : "json" };
 }
 
-export const native = {
+const native = {
   speech: (ctx) => readNative(ctx),
   customization: (ctx) => readNative(ctx, true),
   response(ctx, response) {
@@ -559,3 +548,5 @@ export const native = {
       usage: socketUsage(event.payload && event.payload.usage) };
   },
 };
+
+export { meta, protocols, native };
