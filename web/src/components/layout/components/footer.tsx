@@ -193,16 +193,8 @@ export function Footer(props: FooterProps) {
         title: t('footer.columns.docs.title'),
         links: [
           {
-            text: t('footer.columns.docs.links.quickStart'),
-            href: 'https://docs.newapi.pro/getting-started/',
-          },
-          {
-            text: t('footer.columns.docs.links.installation'),
-            href: 'https://docs.newapi.pro/installation/',
-          },
-          {
             text: t('footer.columns.docs.links.apiDocs'),
-            href: 'https://docs.newapi.pro/api/',
+            href: '/docs',
           },
         ],
       },

@@ -28,6 +28,7 @@ import { NoticeSection } from '../maintenance/notice-section'
 import { SidebarModulesSection } from '../maintenance/sidebar-modules-section'
 import type { SiteSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { DocumentationSection } from './documentation-section'
 
 const SITE_SECTIONS = [
   {
@@ -43,9 +44,6 @@ const SITE_SECTIONS = [
           HomePageContent: settings.HomePageContent,
           ServerAddress: settings.ServerAddress,
           TaskPublicAddress: settings.TaskPublicAddress,
-          general_setting: {
-            docs_link: settings['general_setting.docs_link'],
-          },
           legal: {
             user_agreement: settings['legal.user_agreement'],
             privacy_policy: settings['legal.privacy_policy'],
@@ -53,6 +51,11 @@ const SITE_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'documentation',
+    titleKey: 'Docs',
+    build: () => <DocumentationSection />,
   },
   {
     id: 'notice',

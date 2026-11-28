@@ -224,6 +224,10 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	}
+	if !validateDocumentationOption(option.Key, option.Value.(string)) {
+		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
+		return
+	}
 	switch option.Key {
 	case "GitHubOAuthEnabled":
 		if option.Value == "true" && common.GitHubClientId == "" {

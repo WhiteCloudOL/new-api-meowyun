@@ -377,7 +377,7 @@ function buildImageSample(lang: Lang, ctx: SampleContext): string {
       `    n=1,`,
       ')',
       '',
-      'print(response.data[0].url)',
+      'print(response.data[0].b64_json or response.data[0].url)',
     ].join('\n')
   }
   if (lang === 'typescript') {
@@ -396,7 +396,7 @@ function buildImageSample(lang: Lang, ctx: SampleContext): string {
       `  n: 1,`,
       `})`,
       '',
-      `console.log(response.data[0].url)`,
+      `console.log(response.data[0].b64_json ?? response.data[0].url)`,
     ].join('\n')
   }
   return [
@@ -415,7 +415,7 @@ function buildImageSample(lang: Lang, ctx: SampleContext): string {
     `})`,
     '',
     `const data = await response.json()`,
-    `console.log(data.data[0].url)`,
+    `console.log(data.data[0].b64_json ?? data.data[0].url)`,
   ].join('\n')
 }
 

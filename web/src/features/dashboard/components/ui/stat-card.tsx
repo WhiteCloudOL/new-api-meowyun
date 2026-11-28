@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { LucideIcon } from 'lucide-react'
+import { Activity, type LucideIcon } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -111,6 +112,7 @@ function buildLineSparkline(values?: number[]) {
   const height = 36
   const padding = 3
   const max = Math.max(...sanitized)
+  if (max <= 0) return null
   const min = Math.min(...sanitized)
   const range = max - min
 
@@ -150,11 +152,21 @@ function buildLineSparkline(values?: number[]) {
 }
 
 function LineSparkline(props: { values?: number[]; tone: StatCardTone }) {
+  const { t } = useTranslation()
   const rawGradientId = useId()
   const gradientId = `stat-card-line-${rawGradientId.replaceAll(':', '')}`
   const paths = buildLineSparkline(props.values)
 
-  if (!paths) return <div className='h-8' aria-hidden='true' />
+  if (!paths) {
+    if (!props.values?.length) return <div className='h-8' aria-hidden='true' />
+
+    return (
+      <div className='bg-muted/45 text-muted-foreground flex min-h-8 items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] leading-snug'>
+        <Activity className='size-3 shrink-0' aria-hidden='true' />
+        {t('No recent usage')}
+      </div>
+    )
+  }
 
   return (
     <div

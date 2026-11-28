@@ -126,9 +126,14 @@ body
   :is(
     [data-journal-nav='active'],
     [data-journal-nav][aria-current='page']
-  )::before {
+  ):not([data-journal-mobile-nav] > *)::before {
   content: 'ω';
   margin-inline-end: 0.32em;
+}
+body
+  :is([data-journal-nav='active'], [data-journal-nav][aria-current='page'])
+  > [data-journal-nav-marker] {
+  visibility: visible;
 }
 body .journal-ranking-glow {
   background:
@@ -288,6 +293,10 @@ body .journal-panel-empty [data-slot='empty-title'] {
   }
 }
 @media (prefers-reduced-motion: no-preference) {
+  .overview-mascot-breathe {
+    transform-origin: center bottom;
+    animation: overview-mascot-breathe 5s ease-in-out infinite;
+  }
   body
     :is(
       .journal-entry,
@@ -316,6 +325,16 @@ body .journal-panel-empty [data-slot='empty-title'] {
       [data-sidebar] *
     ) {
     transform: scale(0.96);
+  }
+}
+
+@keyframes overview-mascot-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.012);
   }
 }
 

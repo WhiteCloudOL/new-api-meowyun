@@ -21,7 +21,7 @@ import * as katex from 'katex'
 
 import 'katex/dist/katex.min.css'
 import { Marked, Renderer, type MarkedExtension, type Tokens } from 'marked'
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -31,7 +31,13 @@ interface MarkdownProps {
   breaks?: boolean
   children: string
   className?: string
+  renderDocument?: (
+    content: ReactNode,
+    headings: MarkdownHeading[]
+  ) => ReactNode
 }
+
+export type MarkdownHeading = { id: string; depth: number; text: string }
 
 const markdownOptions = {
   async: false,
@@ -720,18 +726,33 @@ const markdownParser = new Marked({
 
 markdownParser.use(...markdownExtensions)
 
-function addExternalLinkAttributes(html: string, baseUrl?: string): string {
+const documentationRenderer = new Renderer()
+documentationRenderer.code = markdownRenderer.code
+documentationRenderer.html = () => ''
+const documentationParser = new Marked({
+  ...markdownOptions,
+  renderer: documentationRenderer,
+}).use(...markdownExtensions)
+
+function formatDocument(
+  html: string,
+  baseUrl?: string,
+  documentMode = false
+): { html: string; headings: MarkdownHeading[] } {
+  const headings: MarkdownHeading[] = []
   if (typeof window === 'undefined') {
-    return html
+    return { html, headings }
   }
 
   const template = document.createElement('template')
   template.innerHTML = html
 
   template.content.querySelectorAll('a[href]').forEach((link) => {
+    const href = link.getAttribute('href') ?? ''
+    if (documentMode && /^(?:#|\/(?!\/))/.test(href)) return
     if (baseUrl) {
       try {
-        const url = new URL(link.getAttribute('href') ?? '', baseUrl)
+        const url = new URL(href, baseUrl)
         if (['http:', 'https:', 'mailto:'].includes(url.protocol)) {
           link.setAttribute('href', url.href)
         } else {
@@ -745,30 +766,70 @@ function addExternalLinkAttributes(html: string, baseUrl?: string): string {
     link.setAttribute('rel', 'noopener noreferrer')
   })
 
-  return template.innerHTML
+  if (documentMode) {
+    const ids = new Set<string>()
+    for (const heading of template.content.querySelectorAll(
+      'h1,h2,h3,h4,h5,h6'
+    )) {
+      const text = heading.textContent?.trim() ?? ''
+      const slug = text
+        .normalize('NFC')
+        .toLowerCase()
+        .replaceAll(/[^\p{L}\p{M}\p{N}]+/gu, '-')
+        .replace(/^-/, '')
+        .replace(/-$/, '')
+      const base = `doc-${slug || 'section'}`
+      let id = base
+      for (let suffix = 2; ids.has(id); suffix++) {
+        id = `${base}-${suffix}`
+      }
+      ids.add(id)
+      heading.id = id
+      if (text) {
+        headings.push({ id, text, depth: Number(heading.tagName[1]) })
+      }
+    }
+    for (const link of template.content.querySelectorAll('a[href^="#"]')) {
+      try {
+        const fragment = decodeURIComponent(
+          (link.getAttribute('href') ?? '').slice(1)
+        )
+        const id = `doc-${fragment}`
+        if (ids.has(id)) link.setAttribute('href', `#${id}`)
+      } catch {
+        // An invalid escape sequence cannot point to a generated heading.
+      }
+    }
+  }
+
+  return { html: template.innerHTML, headings }
 }
 
 function renderMarkdown(
   markdown: string,
-  breaks = false,
-  baseUrl?: string
-): string {
-  const parsedHtml = markdownParser.parse(markdown, {
+  breaks: boolean | undefined,
+  baseUrl: string | undefined,
+  documentMode: boolean
+) {
+  const parser = documentMode ? documentationParser : markdownParser
+  const parsedHtml = parser.parse(markdown, {
     ...markdownOptions,
-    breaks,
+    breaks: breaks ?? false,
   })
   const html = DOMPurify.sanitize(parsedHtml, sanitizeOptions)
 
-  return addExternalLinkAttributes(html, baseUrl)
+  return formatDocument(html, baseUrl, documentMode)
 }
 
 export function Markdown(props: MarkdownProps) {
-  const html = useMemo(
-    () => renderMarkdown(props.children, props.breaks, props.baseUrl),
-    [props.breaks, props.children, props.baseUrl]
+  const documentMode = Boolean(props.renderDocument)
+  const { html, headings } = useMemo(
+    () =>
+      renderMarkdown(props.children, props.breaks, props.baseUrl, documentMode),
+    [props.breaks, props.children, props.baseUrl, documentMode]
   )
 
-  return (
+  const content = (
     <div
       className={cn(
         'prose prose-sm dark:prose-invert max-w-none',
@@ -804,4 +865,7 @@ export function Markdown(props: MarkdownProps) {
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )
+  return props.renderDocument
+    ? props.renderDocument(content, headings)
+    : content
 }

@@ -244,7 +244,9 @@ export function PublicHeader(props: PublicHeaderProps) {
             {/* Desktop nav */}
             <div className='hidden min-w-0 items-center gap-0.5 lg:flex'>
               {links.map((link) => {
-                const isActive = pathname === link.href
+                const isActive =
+                  pathname === link.href ||
+                  (link.href === '/docs' && pathname.startsWith('/docs/'))
                 if (link.external) {
                   return (
                     <a
@@ -366,9 +368,11 @@ export function PublicHeader(props: PublicHeaderProps) {
         )}
       >
         <div className='flex h-full flex-col justify-between px-8 pt-20 pb-10'>
-          <nav className='flex flex-col gap-1'>
+          <nav className='flex flex-col gap-1' data-journal-mobile-nav>
             {links.map((link, i) => {
-              const isActive = pathname === link.href
+              const isActive =
+                pathname === link.href ||
+                (link.href === '/docs' && pathname.startsWith('/docs/'))
               const linkClassName = cn(
                 'flex items-center gap-3 py-3 text-base font-medium tracking-tight transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]',
                 mobileOpen
@@ -380,6 +384,18 @@ export function PublicHeader(props: PublicHeaderProps) {
               const transitionStyle = {
                 transitionDelay: mobileOpen ? `${100 + i * 50}ms` : '0ms',
               }
+              const label = (
+                <>
+                  <span
+                    aria-hidden='true'
+                    className='invisible w-4 shrink-0 text-center'
+                    data-journal-nav-marker
+                  >
+                    ω
+                  </span>
+                  <span>{t(link.title)}</span>
+                </>
+              )
               if (link.external) {
                 return (
                   <a
@@ -387,13 +403,14 @@ export function PublicHeader(props: PublicHeaderProps) {
                     href={link.href}
                     target='_blank'
                     rel='noopener noreferrer'
+                    data-journal-nav='link'
                     aria-disabled={link.disabled}
                     tabIndex={link.disabled ? -1 : undefined}
                     onClick={(event) => handleNavLinkClick(event, link, true)}
                     className={linkClassName}
                     style={transitionStyle}
                   >
-                    {t(link.title)}
+                    {label}
                   </a>
                 )
               }
@@ -408,7 +425,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                   className={linkClassName}
                   style={transitionStyle}
                 >
-                  {t(link.title)}
+                  {label}
                 </Link>
               )
             })}

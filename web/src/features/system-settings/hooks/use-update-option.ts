@@ -29,6 +29,8 @@ import type { UpdateOptionRequest, UpdatePasskeyDomainsRequest } from '../types'
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
   'general_setting.hide_upstream_info',
+  'console_setting.api_info',
+  'console_setting.api_info_enabled',
   'HeaderNavModules',
   'SidebarModulesAdmin',
   'Notice',

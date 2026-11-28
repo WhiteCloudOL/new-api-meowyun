@@ -22,7 +22,6 @@ import {
   ArrowRight,
   BookOpen,
   Check,
-  ChevronDown,
   ChevronUp,
   Circle,
   Copy,
@@ -37,7 +36,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
-import { useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -67,8 +66,10 @@ import { AnnouncementsPanel } from './announcements-panel'
 import { ApiInfoPanel } from './api-info-panel'
 import { FAQPanel } from './faq-panel'
 import { PerformanceHealthPanel } from './performance-health-panel'
+import { SetupGuideMascot, SetupGuideWelcome } from './setup-guide-welcome'
 import { SummaryCards } from './summary-cards'
 import { UptimePanel } from './uptime-panel'
+import { useOverviewUsage } from './use-overview-usage'
 
 const SETUP_GUIDE_VISIBILITY_STORAGE_KEY =
   'dashboard_overview_setup_guide_expanded'
@@ -183,33 +184,18 @@ function buildCurlCommand(args: {
   ].join('\n')
 }
 
-function SetupGuideBackdrop(props: { compact?: boolean }) {
+function SetupGuideBackdrop() {
   return (
     <>
       <div
-        className={cn(
-          'pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_48%_120%_at_78%_0%,color-mix(in_oklch,var(--overview-accent-1)_14%,transparent)_0%,transparent_62%),linear-gradient(112deg,color-mix(in_oklch,var(--card)_94%,var(--overview-accent-2)_6%)_0%,color-mix(in_oklch,var(--card)_94%,var(--overview-accent-3)_6%)_48%,color-mix(in_oklch,var(--background)_90%,var(--overview-accent-1)_10%)_100%)] dark:opacity-60',
-          props.compact
-            ? '[mask-image:linear-gradient(90deg,black_0%,black_48%,transparent_74%)] opacity-55'
-            : 'opacity-85'
-        )}
+        className='pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_48%_120%_at_78%_0%,color-mix(in_oklch,var(--overview-accent-1)_14%,transparent)_0%,transparent_62%),linear-gradient(112deg,color-mix(in_oklch,var(--card)_94%,var(--overview-accent-2)_6%)_0%,color-mix(in_oklch,var(--card)_94%,var(--overview-accent-3)_6%)_48%,color-mix(in_oklch,var(--background)_90%,var(--overview-accent-1)_10%)_100%)] opacity-85 dark:opacity-60'
         aria-hidden='true'
       />
       <div
-        className={cn(
-          'text-foreground/5 dark:text-foreground/8 pointer-events-none absolute inset-y-0 right-0 hidden overflow-hidden font-mono sm:block',
-          props.compact ? 'w-1/2 opacity-45' : 'w-[58%] opacity-75'
-        )}
+        className='text-foreground/5 dark:text-foreground/8 pointer-events-none absolute inset-y-0 right-0 hidden w-[58%] overflow-hidden font-mono opacity-75 sm:block'
         aria-hidden='true'
       >
-        <pre
-          className={cn(
-            'absolute right-3 [mask-image:linear-gradient(90deg,transparent_0%,black_30%,black_82%,transparent_100%)] text-right tracking-[0.38em] whitespace-pre',
-            props.compact
-              ? '-top-6 text-[9px] leading-4'
-              : 'top-1 text-[11px] leading-5'
-          )}
-        >
+        <pre className='absolute top-1 right-3 [mask-image:linear-gradient(90deg,transparent_0%,black_30%,black_82%,transparent_100%)] text-right text-[11px] leading-5 tracking-[0.38em] whitespace-pre'>
           {SETUP_GUIDE_CODE_PATTERN}
         </pre>
       </div>
@@ -264,7 +250,7 @@ function StartStepItem(props: {
               </span>
               <span className='truncate'>{props.step.title}</span>
             </span>
-            <span className='text-muted-foreground line-clamp-1 text-xs'>
+            <span className='text-muted-foreground line-clamp-2 text-xs'>
               {props.step.description}
             </span>
           </span>
@@ -451,11 +437,11 @@ function CompactQuickAction(props: { action: QuickAction }) {
     <Button
       variant='outline'
       size='sm'
-      className='bg-background/70 h-8 min-w-24 gap-1.5 px-2.5'
+      className='bg-background/70 h-8 min-w-0 justify-start gap-1.5 px-2.5'
       render={<Link to={props.action.to} />}
     >
       <Icon data-icon='inline-start' />
-      <span>{props.action.title}</span>
+      <span className='truncate'>{props.action.title}</span>
     </Button>
   )
 }
@@ -464,6 +450,7 @@ export function OverviewDashboard() {
   const { t } = useTranslation()
   const setupGuideId = useId()
   const setupGuideToggleRef = useRef<HTMLButtonElement>(null)
+  const restoreGuideToggleFocus = useRef(false)
   const user = useAuthStore((state) => state.auth.user)
   const { items: apiInfoItems } = useApiInfo()
   const {
@@ -480,6 +467,7 @@ export function OverviewDashboard() {
   const remainQuota = Number(user?.quota ?? 0)
   const usedQuota = Number(user?.used_quota ?? 0)
   const isAdmin = Boolean(user?.role && user.role >= ROLE.ADMIN)
+  const overviewUsage = useOverviewUsage(remainQuota, user?.id)
 
   const apiKeysQuery = useQuery({
     queryKey: ['dashboard', 'overview', 'api-keys'],
@@ -614,90 +602,84 @@ export function OverviewDashboard() {
   const setupStatusReady = apiKeysQuery.isFetched && Boolean(user)
   const setupGuideExpanded =
     manualSetupGuideExpanded ?? (setupStatusReady && !setupComplete)
+  const showWelcome =
+    !setupGuideExpanded &&
+    (setupStatusReady || manualSetupGuideExpanded === false)
   const showLeftContentPanels =
     isAdmin || showApiInfoPanel || showAnnouncementsPanel || showFAQPanel
   const showContentPanels = showLeftContentPanels || showUptimePanel
 
+  useEffect(() => {
+    if (!restoreGuideToggleFocus.current) return
+    setupGuideToggleRef.current?.focus()
+    restoreGuideToggleFocus.current = false
+  }, [setupGuideExpanded])
+
   const handleSetupGuideToggle = () => {
     const nextExpanded = !setupGuideExpanded
+    restoreGuideToggleFocus.current = true
     setManualSetupGuideExpanded(nextExpanded)
     saveSetupGuideExpanded(nextExpanded)
-    if (!nextExpanded && setupComplete) {
-      setupGuideToggleRef.current?.focus()
-    }
   }
 
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Overview')}</SectionPageLayout.Title>
-      <SectionPageLayout.Actions>
-        {setupStatusReady && setupComplete && (
-          <Button
-            ref={setupGuideToggleRef}
-            variant='ghost'
-            size='sm'
-            className='text-muted-foreground hover:text-foreground h-auto min-h-7 max-w-[60vw] whitespace-normal'
-            aria-expanded={setupGuideExpanded}
-            aria-controls={setupGuideId}
-            onClick={handleSetupGuideToggle}
-          >
-            {t('Setup guide')}
-          </Button>
-        )}
-      </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='flex flex-col gap-4'>
           <div id={setupGuideId} hidden={!setupGuideExpanded}>
             {setupGuideExpanded && (
               <CardStaggerContainer className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]'>
-                <CardStaggerItem className='bg-card h-full overflow-hidden rounded-2xl border shadow-xs'>
-                  <div className='relative h-full overflow-hidden p-4 sm:p-5'>
+                <CardStaggerItem className='bg-card @container/setup relative isolate h-full overflow-visible rounded-2xl border shadow-xs'>
+                  <div className='pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[inherit]'>
                     <SetupGuideBackdrop />
-                    <div className='relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_21rem]'>
-                      <div className='flex min-w-0 flex-col gap-5'>
-                        <div className='flex flex-wrap items-start justify-between gap-3'>
-                          <div className='flex max-w-2xl flex-col gap-1'>
-                            <div className='text-muted-foreground flex items-center gap-2 text-xs font-medium tracking-wider uppercase'>
-                              <ListChecks
-                                className='size-3.5'
-                                aria-hidden='true'
-                              />
-                              {t('Get started')}
-                            </div>
-                            <h3 className='text-xl font-semibold tracking-tight sm:text-2xl'>
-                              {t('Build on your API gateway in minutes')}
-                            </h3>
-                          </div>
-                          <div className='flex flex-wrap items-center gap-2'>
-                            <Button
-                              variant='outline'
-                              size='sm'
-                              aria-expanded={setupGuideExpanded}
-                              aria-controls={setupGuideId}
-                              onClick={handleSetupGuideToggle}
-                            >
-                              <ChevronUp data-icon='inline-start' />
-                              {t('Hide setup guide')}
-                            </Button>
-                            <Button size='sm' render={<Link to='/keys' />}>
-                              <KeyRound data-icon='inline-start' />
-                              {t('Create API Key')}
-                            </Button>
-                          </div>
+                  </div>
+                  <div className='relative grid min-h-full gap-x-3 gap-y-3 px-3 py-3 sm:px-4 md:py-4 md:@min-[36rem]/setup:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:@min-[47rem]/setup:grid-cols-[minmax(13rem,1fr)_minmax(10rem,0.78fr)_minmax(15rem,1fr)]'>
+                    <div className='flex min-w-0 flex-col justify-center gap-3'>
+                      <div className='relative isolate min-h-24 pe-26 md:pe-21 md:@min-[47rem]/setup:min-h-0 md:@min-[47rem]/setup:pe-0'>
+                        <div className='pointer-events-none absolute end-0 bottom-0 -z-10 h-[92px] w-26 overflow-hidden md:h-20 md:w-20 md:@min-[47rem]/setup:hidden'>
+                          <SetupGuideMascot className='absolute inset-x-0 top-0 h-[127%] w-full object-cover object-top' />
                         </div>
-
-                        <ol className='bg-background/45 rounded-2xl border p-2 backdrop-blur'>
-                          {startSteps.map((step, index) => (
-                            <StartStepItem
-                              key={step.title}
-                              step={step}
-                              index={index}
-                              isLast={index === startSteps.length - 1}
+                        <div className='flex flex-col items-start gap-1'>
+                          <div className='text-muted-foreground flex items-center gap-2 text-xs font-medium tracking-wider uppercase'>
+                            <ListChecks
+                              className='size-3.5'
+                              aria-hidden='true'
                             />
-                          ))}
-                        </ol>
+                            {t('Get started')}
+                          </div>
+                          <h3 className='text-base leading-tight font-semibold tracking-tight sm:text-xl'>
+                            {t('Build on your API gateway in minutes')}
+                          </h3>
+                          <Button
+                            ref={setupGuideToggleRef}
+                            variant='outline'
+                            size='sm'
+                            className='bg-background/80 mt-1 h-auto min-h-7 px-2.5 text-start whitespace-normal'
+                            aria-expanded={setupGuideExpanded}
+                            aria-controls={setupGuideId}
+                            onClick={handleSetupGuideToggle}
+                          >
+                            <ChevronUp data-icon='inline-start' />
+                            {t('Hide setup guide')}
+                          </Button>
+                        </div>
                       </div>
-
+                      <ol className='bg-background/55 rounded-2xl border p-2 backdrop-blur'>
+                        {startSteps.map((step, index) => (
+                          <StartStepItem
+                            key={step.title}
+                            step={step}
+                            index={index}
+                            isLast={index === startSteps.length - 1}
+                          />
+                        ))}
+                      </ol>
+                    </div>
+                    <div className='relative hidden self-stretch md:@min-[47rem]/setup:block'>
+                      <SetupGuideMascot className='overview-mascot-breathe absolute inset-x-0 -top-[22px] h-[calc(100%+38px)] w-full [mask-image:linear-gradient(90deg,transparent,black_9%,black_91%,transparent)] object-cover object-top' />
+                    </div>
+                    <div className='relative min-w-0 self-center'>
                       <RequestPreview
                         example={requestExample}
                         signals={heroSignals}
@@ -726,63 +708,33 @@ export function OverviewDashboard() {
               </CardStaggerContainer>
             )}
           </div>
-          {!setupGuideExpanded && !setupComplete && (
-            <CardStaggerContainer>
-              <CardStaggerItem className='bg-card overflow-hidden rounded-2xl border shadow-xs'>
-                <div className='relative overflow-hidden px-4 py-3 sm:px-5'>
-                  <SetupGuideBackdrop compact />
-                  <div className='relative flex flex-wrap items-center justify-between gap-3'>
-                    <div className='flex min-w-0 items-center gap-3'>
-                      <span className='bg-background/70 flex size-9 shrink-0 items-center justify-center rounded-xl border shadow-xs'>
-                        <Check
-                          className='text-success size-4'
-                          aria-hidden='true'
-                        />
-                      </span>
-                      <div className='min-w-0'>
-                        <div className='flex items-center gap-2'>
-                          <h3 className='truncate text-sm font-semibold'>
-                            {t('Setup guide')}
-                          </h3>
-                          <span className='text-muted-foreground bg-background/60 rounded-md border px-2 py-0.5 text-xs'>
-                            {t('Setup progress: {{completed}}/{{total}}', {
-                              completed: completedStepCount,
-                              total: startSteps.length,
-                            })}
-                          </span>
-                        </div>
-                        <p className='text-muted-foreground line-clamp-1 text-xs'>
-                          {t('Setup guide is collapsed. Expand it anytime.')}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className='flex flex-wrap items-center gap-2'>
-                      {visibleQuickActions.map((action) => (
-                        <CompactQuickAction
-                          key={action.title}
-                          action={action}
-                        />
-                      ))}
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        className='bg-background/70 h-8 min-w-28'
-                        aria-expanded={setupGuideExpanded}
-                        aria-controls={setupGuideId}
-                        onClick={handleSetupGuideToggle}
-                      >
-                        <ChevronDown data-icon='inline-start' />
-                        {t('Show setup guide')}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+          {showWelcome && (
+            <CardStaggerContainer className='grid items-stretch gap-2.5 xl:grid-cols-[minmax(0,1fr)_22rem] xl:gap-4'>
+              <CardStaggerItem className='flex min-w-0'>
+                <SetupGuideWelcome
+                  balance={remainQuota}
+                  todayUsage={overviewUsage.todayUsage}
+                  health={overviewUsage.health}
+                  showHealth={
+                    Boolean(user) &&
+                    (overviewUsage.hasTrendData || remainQuota <= 0)
+                  }
+                  completed={completedStepCount}
+                  total={startSteps.length}
+                  guideId={setupGuideId}
+                  toggleRef={setupGuideToggleRef}
+                  onExpand={handleSetupGuideToggle}
+                />
+              </CardStaggerItem>
+              <CardStaggerItem className='bg-card grid min-w-0 grid-cols-2 content-center gap-1.5 rounded-2xl border p-2 shadow-xs sm:gap-2 sm:p-3'>
+                {visibleQuickActions.map((action) => (
+                  <CompactQuickAction key={action.title} action={action} />
+                ))}
               </CardStaggerItem>
             </CardStaggerContainer>
           )}
 
-          <SummaryCards />
+          <SummaryCards usage={overviewUsage} />
 
           {showContentPanels && (
             <CardStaggerContainer

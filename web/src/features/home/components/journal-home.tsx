@@ -67,11 +67,6 @@ function highlightExample(command: string) {
 export function JournalHome({ isAuthenticated }: { isAuthenticated: boolean }) {
   const { t } = useTranslation()
   const { status, hasServerResponse } = useStatus()
-  const docs =
-    typeof status?.docs_link === 'string' &&
-    /^https?:\/\//i.test(status.docs_link)
-      ? status.docs_link
-      : '/docs'
   const [language, setLanguage] = useState('cURL')
   const nav = parseHeaderNavModulesFromStatus(status)
   const address = String(
@@ -355,14 +350,14 @@ export function JournalHome({ isAuthenticated }: { isAuthenticated: boolean }) {
       </section>
       <div className='journal-resources'>
         {nav.docs && (
-          <a href={docs}>
+          <Link to='/docs'>
             <BookOpen />
             <span>
               {t('footer.columns.docs.links.apiDocs')}
               <small>{t('Explore supported endpoints')}</small>
             </span>
             <ArrowUpRight />
-          </a>
+          </Link>
         )}
         {nav.console && (
           <>

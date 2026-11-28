@@ -27,6 +27,9 @@ import {
 export const Route = createFileRoute(
   '/_authenticated/system-settings/site/$section'
 )({
+  validateSearch: (search: Record<string, unknown>): { doc?: string } => ({
+    doc: typeof search.doc === 'string' ? search.doc : undefined,
+  }),
   beforeLoad: ({ params }) => {
     const validSections = SITE_SECTION_IDS as unknown as string[]
     if (!validSections.includes(params.section)) {

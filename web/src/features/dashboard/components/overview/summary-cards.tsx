@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
@@ -30,18 +29,16 @@ import { useTranslation } from 'react-i18next'
 
 import { StaggerContainer, StaggerItem } from '@/components/page-transition'
 import { Button } from '@/components/ui/button'
-import { getUserQuotaDates } from '@/features/dashboard/api'
 import { useSummaryCardsConfig } from '@/features/dashboard/hooks/use-dashboard-config'
 import type { QuotaDataItem } from '@/features/dashboard/types'
 import { useStatus } from '@/hooks/use-status'
 import { getCurrencyLabel, isCurrencyDisplayEnabled } from '@/lib/currency'
 import { formatNumber, formatQuota } from '@/lib/format'
-import { requireServerSuccess } from '@/lib/server-error-message'
-import { computeTimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { StatCard } from '../ui/stat-card'
+import type { OverviewUsage } from './use-overview-usage'
 
 const SUMMARY_SPARKLINE_BUCKETS = 12
 
@@ -106,71 +103,14 @@ function getSummarySparkline(
   return undefined
 }
 
-function getRunwayDays(
-  remainQuota: number,
-  recentUsage: number
-): number | null {
-  if (remainQuota <= 0 || recentUsage <= 0) return null
-  const days = remainQuota / recentUsage
-  if (!Number.isFinite(days)) return null
-  return days
-}
-
-type HealthLevel = 'healthy' | 'caution' | 'critical'
-
-function getHealthLevel(remainQuota: number, recentUsage: number): HealthLevel {
-  if (remainQuota <= 0) return 'critical'
-  const days = getRunwayDays(remainQuota, recentUsage)
-  if (days !== null && days < 3) return 'caution'
-  return 'healthy'
-}
-
-const HEALTH_CONFIG: Record<
-  HealthLevel,
-  { dotClass: string; labelKey: string }
-> = {
-  healthy: {
-    dotClass: 'bg-success',
-    labelKey: 'Healthy',
-  },
-  caution: {
-    dotClass: 'bg-warning',
-    labelKey: 'Low balance',
-  },
-  critical: {
-    dotClass: 'bg-destructive',
-    labelKey: 'Balance depleted',
-  },
-}
-
-export function SummaryCards() {
+export function SummaryCards({ usage }: { usage: OverviewUsage }) {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
   const { status, loading } = useStatus()
 
-  const summaryTimeRange = useMemo(() => computeTimeRange(1), [])
   const remainQuota = Number(user?.quota ?? 0)
   const usedQuota = Number(user?.used_quota ?? 0)
   const requestCount = Number(user?.request_count ?? 0)
-
-  const usageTrendQuery = useQuery({
-    queryKey: [
-      'dashboard',
-      'overview',
-      'summary-sparklines',
-      summaryTimeRange.start_timestamp,
-      summaryTimeRange.end_timestamp,
-    ],
-    queryFn: async () =>
-      requireServerSuccess(
-        await getUserQuotaDates({
-          start_timestamp: summaryTimeRange.start_timestamp,
-          end_timestamp: summaryTimeRange.end_timestamp,
-          default_time: 'hour',
-        })
-      ),
-    staleTime: 60 * 1000,
-  })
 
   const summaryValues = useMemo(() => {
     return {
@@ -193,31 +133,20 @@ export function SummaryCards() {
   const sparklineData = useMemo(
     () =>
       buildSummarySparklines(
-        usageTrendQuery.data?.data ?? [],
+        usage.recentRows,
         remainQuota,
-        summaryTimeRange.start_timestamp,
-        summaryTimeRange.end_timestamp
+        usage.range.start_timestamp,
+        usage.range.end_timestamp
       ),
     [
       remainQuota,
-      summaryTimeRange.end_timestamp,
-      summaryTimeRange.start_timestamp,
-      usageTrendQuery.data?.data,
+      usage.range.end_timestamp,
+      usage.range.start_timestamp,
+      usage.recentRows,
     ]
   )
 
-  const recentUsage = useMemo(
-    () =>
-      (usageTrendQuery.data?.data ?? []).reduce(
-        (total, item) => total + (Number(item.quota) || 0),
-        0
-      ),
-    [usageTrendQuery.data?.data]
-  )
-
-  const healthLevel = getHealthLevel(remainQuota, recentUsage)
-  const healthCfg = HEALTH_CONFIG[healthLevel]
-  const runwayDays = getRunwayDays(remainQuota, recentUsage)
+  const { recentUsage, healthLevel, health: healthCfg, runwayDays } = usage
 
   const todayUsageDisplay = formatQuota(recentUsage)
   let runwayDisplay: string
@@ -284,7 +213,7 @@ export function SummaryCards() {
                   description={it.desc}
                   icon={it.icon}
                   tone={it.tone}
-                  sparkline={it.sparkline}
+                  sparkline={usage.hasTrendData ? it.sparkline : undefined}
                   sparklineVariant={it.sparklineVariant}
                   loading={loading}
                   compactMobile

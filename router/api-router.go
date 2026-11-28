@@ -33,6 +33,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/user-agreement", controller.GetUserAgreement)
 		apiRouter.GET("/privacy-policy", controller.GetPrivacyPolicy)
 		apiRouter.GET("/about", controller.GetAbout)
+		apiRouter.GET("/docs", controller.GetDocsSections)
+		apiRouter.GET("/docs/:section", controller.GetDocs)
 		//apiRouter.GET("/midjourney", controller.GetMidjourney)
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.DisableCache(), middleware.HeaderNavModuleAuth("pricing"), controller.GetPricing)
